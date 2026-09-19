@@ -61,7 +61,7 @@ and carry the confirmation marker. Q12–Q15 came up while designing this spec.
   `model_provider` from `config.toml` flows into `resolveModelIdentity` as `configuredProvider`
   (`agent-config/model-settings/codex.ts`, `workflows/run.ts:110`). So `azure/<deployment>` already resolves
   **if** the user's global default provider is `azure`. A user whose default is OpenAI and who wants one task on
-  Azure gets `ModelIdentityError` (`core/model-identity.ts:152-163`), and nothing in the cockpit says why. xAI is
+  Azure gets `ModelIdentityError` (`core/model-identity.ts:154-163`), and nothing in the cockpit says why. xAI is
   worse: codex's env allowlist (`core/agent-env.ts:223`) drops `XAI_API_KEY`, so a correctly configured xAI provider
   fails with an auth error from inside codex.
 - **Gemini and Copilot users cannot use their own agent.** Both CLIs have a documented headless or streaming
@@ -201,13 +201,13 @@ client and mapper, and each adds a runner class plus a dialect: `AGENT_PROTOCOL.
   `contract-parity*.test.ts` stays green. `health.ts:4` and `:17` import it; check names become
   `z.enum([...RUNNER_IDS, 'gh', 'git'])`.
 - `core/agent-runner.ts` re-exports `RUNNER_IDS` / `RunnerId` from the contract. The service already imports contract
-  values at runtime (`workspace/migrations.ts`), and `scripts/inline-contract.mjs` folds them into the published
+  values at runtime (`workspace/migrations.ts`), and `packages/cezar/scripts/inline-contract.mjs` folds them into the published
   tarball. Phase 0 does not change that mechanism.
 - `PROVIDER_IDS = RUNNER_IDS` (`provider-auth.ts:7`). A provider is a runner for auth purposes today; the alias keeps the
   name for call sites. `UiBackend` stays a literal union in both `ui-events.ts` files, because the api-client mirror
   **must stay import-free** (`api-client/src/protocol/ui-events.ts:12`). Instead, the existing type-exactness test
   gains an assertion that `UiBackend` equals the contract's `Runner`, so a missed edit fails typecheck. Both files
-  are the guard test's only allowlisted literal sites.
+  are on the guard test's allowlist (below).
 - Every `Record<RunnerId, …>` table stays a `Record` (the compiler already enforces it). Every hand-written
   `z.object({claude, codex, opencode, pi})` becomes `perRunner(…)`, with the same per-field schema, `.optional()` and
   `.catch()` behavior at every site. `perRunner` yields required keys, so optional-key sites add `.partial()`. The
@@ -223,24 +223,62 @@ client and mapper, and each adds a runner class plus a dialect: `AGENT_PROTOCOL.
   `run.ts:3644,4436` a `RunnerId`), so the `undefined` parameter type is dropped with it.
 - `resumeCommand()` (`server.ts:6230`) and `open-in-app.ts:133` move to a per-runner `Record<RunnerId, …>` table for the
   same reason: today, an unknown runner resumes as `claude --resume`. **The old `default` also carries records that
-  have no `runner` at all** (`RunRecord.runner` is optional, `store.ts:158`; `server.ts:4185` passes it through).
+  have no `runner` at all** (`RunRecord.runner` is optional, `packages/cezar/src/runs/store.ts:158`; `server.ts:4185` passes it through).
   That behavior is kept explicitly as `run.runner ?? 'claude'` at the call site, the way `server.ts:4291` already
   does, and a test pins "runner-less record → `claude --resume`".
 - **`runs.json` downgrade safety (BACKWARD_COMPATIBILITY.md §3).** Today `RunStore.open` parses the index as one array
-  (`store.ts:727-738`). A single record whose `runner` the running version does not know fails the whole parse, and
-  the store starts empty, so the next save **overwrites every run**. After running a Phase 2 task, a downgrade would
-  therefore silently discard history, which §3 calls breaking. Phase 0 changes the load to per-record salvage:
-  - records that fail `runRecordSchema` are kept verbatim in the store, invisible to every consumer, and re-emitted
-    unchanged on save;
-  - one warning names how many records were preserved unread.
+  (`packages/cezar/src/runs/store.ts:723-740`). A single record whose `runner` the running version does not know fails
+  the whole parse, and the store starts empty, so the next save (`saveNow`, `:1442`) **overwrites every run**. After
+  running a Phase 2 task, a downgrade would therefore silently discard history, which §3 calls breaking. Phase 0
+  changes the load to per-record salvage:
+  - each array element is parsed on its own. An element that fails `runRecordSchema` goes into a **salvage pool**
+    (`Map<id, SalvagedRecord>`), where `SalvagedRecord = {id, createdAt, archived, raw}`: `raw` is the element
+    verbatim, and the three header fields come from a minimal header schema (`id: string`,
+    `createdAt: string`, `archived: boolean` defaulting to `false`). An element without a string `id` and
+    `createdAt` cannot be addressed or ordered, and is dropped with the warning below, as today's loader drops it;
+  - salvaged records are invisible to the read API (`listRuns`, `getRun`, SSE, the cockpit), because nothing that
+    consumes a `RunRecord` can be handed a shape it does not know;
+  - **but they are not invisible to lifecycle.** Retention and deletion are consumers, and the store addresses
+    salvaged records through their header:
+    - `deleteRun(id)` removes the id from the live map **or** the salvage pool, together with the same on-disk
+      companions (events, handoff, images, drafts), and returns `true` for either. A user can always delete a run the
+      running version cannot read, including its verbatim prompt text;
+    - `pruneOldRuns` counts salvaged records in its pools: `MAX_RUNS_KEPT` / `MAX_ARCHIVED_KEPT` are applied to the
+      union of live and salvaged headers ordered by `createdAt`, so the pool is bounded by the same caps as the file
+      and cannot grow across repeated downgrade/upgrade cycles;
+  - `saveNow` writes one array: live records and salvaged `raw` elements merged in the same `createdAt`-descending
+    order `listRuns` already uses (ties broken by `id`), so the write order is deterministic and a round trip leaves
+    the file's order unchanged;
+  - one warning names how many records were preserved unread, and how many were dropped as unaddressable.
 
   Every version from Phase 0 on can then be downgraded to safely. Versions before Phase 0 still lose history when
   they read a newer file, and the Phase 2/3 CHANGELOG entries say so.
+- **Two more sites the inventory above missed**, both converted in Phase 0:
+  - `packages/web/e2e/new-task.e2e.ts:150` — `['claude', 'codex', 'opencode'].filter(…)` decides "runner pill iff the
+    host offers >1 backend". It is not a deliberate subset; it is stale (it already omits `pi`). It becomes
+    `RUNNER_IDS.filter(…)`.
+  - `packages/cezar/src/core/runner-model-catalog.ts:100` — `unavailableReason()` is a fall-through ternary
+    (`runner === 'codex' ? 'Codex' : runner === 'claude' ? 'Claude' : 'OpenCode'`) that already mislabels `pi`. It
+    becomes a `Record<RunnerId, string>` display-name table (shared with the other display-name sites where one
+    exists), so a new id is a type error.
 - **Guard test (new, `runner-union.test.ts`):** greps `packages/*/src` and `packages/web/e2e` (excluding fixtures and
-  unit tests) for an array or union literal naming two or more runner ids, or a `||`-chain of `=== '<runner>'`
-  comparisons over two or more ids. A single-runner branch such as `runner === 'pi'` is legitimate and is not
-  matched. It fails with the file:line and says "derive from RUNNER_IDS"; the two `ui-events.ts` files are allowlisted.
-  This makes the next runner's union sites findable by the test suite, not by review.
+  unit tests) for:
+  - an array or union literal naming two or more runner ids;
+  - a `||`-chain of `=== '<runner>'` comparisons over two or more ids;
+  - a ternary chain branching on two or more `runner === '<id>'` tests (the `unavailableReason` shape).
+
+  A single-runner branch such as `runner === 'pi'` is legitimate and is not matched. A match fails with the file:line
+  and says "derive from RUNNER_IDS". **The allowlist is a named list in the test file, one entry per site, each with a
+  one-line rationale; a new entry without a rationale fails the test itself.** It starts with exactly three entries:
+
+  | Site | Rationale |
+  |---|---|
+  | `packages/cezar/src/core/ui-events.ts` (`UiBackend`) | Mirror of the api-client type; kept a literal so both files stay in lock-step, and the type-exactness test pins `UiBackend` = `Runner`. |
+  | `packages/api-client/src/protocol/ui-events.ts` (`UiBackend`) | The api-client protocol module must stay import-free (`:12`); same type-exactness pin. |
+  | `packages/contract/src/workspace.ts` (`modelDiscoveryRunnerSchema`) | A deliberate **subset**: the runners with a live `/models` discovery path (§ API Contracts). Deriving it from `RUNNER_IDS` would be wrong. |
+
+  This makes the next runner's union sites findable by the test suite, not by review, and keeps the allowlist from
+  becoming a file everyone appends to.
 
 Phase 0 changes no wire shape. Proof: `contract-parity*.test.ts`, `route-parity.test.ts` and the api-client
 type-exactness test pass unchanged. BACKWARD_COMPATIBILITY.md §9 is corrected in passing: it lists account
@@ -249,11 +287,16 @@ rejects exactly what the old literal did.
 
 ### Phase 1 — codex serves any provider the user declared
 
-**Model settings.** `model-settings/codex.ts` already reads `config.toml` (user, then project scope; see
-`readNativeSettingsFiles`). It gains one field: `declaredProviders: string[]`. That is the keys of the
-`[model_providers.*]` tables **in the user-scope file only** (`$CODEX_HOME/config.toml`, default `~/.codex`), plus codex's built-in provider ids (`openai`, and the OSS ids codex ships; the exact
-list comes from the codex version under test and is pinned in a fixture). `AgentModelSettings` gets the optional
-field for every runner; only codex fills it.
+**Model settings.** `model-settings/codex.ts` already reads `config.toml` through `readNativeSettingsFiles`
+(`model-settings/shared.ts:63-82`), which orders files by catalog `modelPriority` **descending** — project scope
+(`codex.project.config`, priority 2) before user scope (`codex.user.config`, priority 1). Only the user definition
+declares `modelProviderKey`, which is why project scope already contributes no configured provider. It gains one field:
+`declaredProviders: string[]`. That is the keys of the `[model_providers.*]` tables **in the user-scope file only**
+(`$CODEX_HOME/config.toml`, default `~/.codex`; selected by the definition's `scope`, not by read order), plus codex's
+built-in provider ids (`openai`, and the OSS ids codex ships; the exact list comes from the codex version under test
+and is pinned in a fixture). Alongside the ids, the reader keeps each declared provider's credential names
+(`env_key`, and the variable names in `env_http_headers`) for the Q12 carrier below. `AgentModelSettings` gets the
+optional field for every runner; only codex fills it.
 
 Project scope contributes **nothing** to providers or credential names. Codex itself refuses provider and auth keys at
 project scope (`agent-config/catalog.ts:205`). Worse, honouring them would let a cloned repository's
@@ -300,7 +343,27 @@ from the user-scope `config.toml` only. Names are validated as `^[A-Z_][A-Z0-9_]
 actually serving the run, including the configured default: a user whose global default is xAI gets `XAI_API_KEY`
 forwarded, which fixes today's silent drop.
 
-**Discoverability.** The `GET …/config` answer (`server.ts:5520-5545`) gains an additive
+**The carrier, end to end.** For codex, `buildChildEnv` runs inside the transport
+(`core/codex-app-server-transport.ts:24`), which knows nothing about providers and does no config I/O. The names
+therefore travel on the run spec, and the `config.toml` read stays in `agent-config/`, where `readNativeSettingsFiles`
+already lives:
+
+1. `run.ts` — the same helper that returns `{backendModel, modelProvider}` (§ Data Model) also returns
+   `forwardEnvNames`: the chosen provider's `env_key` / `env_http_headers` names, looked up in the user-scope
+   declared-provider table that `model-settings/codex.ts` read (it keeps `{id, envNames}` per declared provider, not
+   only the ids). Validation (`^[A-Z_][A-Z0-9_]*$`) happens here, once.
+2. `AgentRunSpec.forwardEnvNames?: readonly string[]` — a second new field beside `modelProvider`.
+3. `CodexAppServerRunner` passes it through: `spawnCodexAppServer(bin, spec.cwd, spec.env, spec.forwardEnvNames)`
+   (`codex-app-server-runner.ts:144`) → `buildCodexAppServerEnv(extraEnv, extraNames)` →
+   `buildChildEnv({ backend: 'codex', extraEnv, extraNames })`.
+
+The transport stays free of file I/O and of `agent-config/` imports. `buildChildEnv` treats `extraNames` as an exact
+allowlist addition: it copies a listed variable only if it is set in the host env, and never a name that the
+backend's deny rules exclude. Every other caller passes nothing, and its env is unchanged. The rejected alternative —
+the transport re-reading `config.toml` — would pull `agent-config/` into `core/` and add a synchronous file read at
+spawn, at the one boundary that forwards host secrets (#427).
+
+**Discoverability.** The `GET …/config` answer (`server.ts:5523-5548`) gains an additive
 `providers?: Partial<Record<Runner, {configured?: string; declared: string[]}>>`, a contract schema in
 `packages/contract` (via `perRunner`). The cockpit's codex model picker:
 
@@ -361,7 +424,7 @@ that dies mid-turn rejects the pending prompt (`turn.completed{error}`), and the
 
 **Permissions (Q15).** Only `auto` exists in code today: the permission-modes spec (`2026-07-17-permission-modes`) is
 approved but unbuilt. No runner emits `permission.requested`, no in-run card exists, and codex hard-codes
-`approvalPolicy: 'never'` (`codex-app-server-runner.ts:350`). Phases 2–3 therefore ship `auto` only:
+`approvalPolicy: 'never'` (`codex-app-server-runner.ts:351`). Phases 2–3 therefore ship `auto` only:
 - the CLI's allow-everything start mode (Gemini `--approval-mode yolo`; Copilot `--allow-all-tools`);
 - an automatic `allow_always` answer to any `session/request_permission` that still arrives, which is also emitted as
   a `note`, so no request can park a run with nothing able to wake it (AGENTS.md, "enumerate the transitions").
@@ -445,8 +508,12 @@ mode does (§6).
   codex. No new field.
 - `AgentRunSpec.modelProvider?: string` (Phase 1). This is in-memory only (not persisted, not on the wire). It is set
   at **both** places the spec is built, the two `runner.startSession` calls (`run.ts:3664` and `run.ts:4441`),
-  through one helper that returns `{backendModel, modelProvider}`, so neither site can ship half the fix (AGENTS.md,
-  "find every construction site").
+  through one helper that returns `{backendModel, modelProvider, forwardEnvNames}`, so neither site can ship half the
+  fix (AGENTS.md, "find every construction site").
+- `AgentRunSpec.forwardEnvNames?: readonly string[]` (Phase 1). In-memory only. The validated exact env-var names the
+  codex child may inherit for the provider serving the run (§ Phase 1, "The carrier, end to end"); set by the same
+  helper at the same two sites, and read only by the codex runner, which hands it to the transport's
+  `buildChildEnv({ extraNames })`.
 - No new files under `.ai/cezar/` or `~/.cezar/`. Credentials stay in the environment and the vendors' own stores.
 
 ## 📝 API Contracts
@@ -456,8 +523,19 @@ mode does (§6).
   `providers?: {[runner]: {configured?: string, declared: string[]}}`, a schema in `packages/contract`, chained route
   unchanged, `contract-parity` both directions. BACKWARD_COMPATIBILITY.md §2 lists it as additive.
 - **Phases 2–3:** every body/param that carries `runnerSchema` (`POST /api/v1/runs`, `PUT /api/v1/config`,
-  `PUT /api/v1/workspace/config` `agentDefaults`, automations, agent accounts, `GET /api/v1/models?runner=`) accepts the
-  new id automatically, via Phase 0. `GET /api/v1/health` `checks[].name` gains `gemini` / `copilot`. Health is the
+  `PUT /api/v1/workspace/config` `agentDefaults`, automations, agent accounts) accepts the new id automatically, via
+  Phase 0.
+- **`GET /api/v1/models?runner=` is the exception and does not change.** It validates against the contract's
+  deliberately narrower `modelDiscoveryRunnerSchema = z.enum(['claude', 'codex', 'opencode'])`
+  (`packages/contract/src/workspace.ts:493`, route at `server.ts:1727`), not `runnerSchema`. `gemini` and `copilot`
+  stay **out** of it, as `pi` already is: `runnerDiscoversModels()` returns `false` for them, the cockpit never
+  queries the route for them (`web/src/api/queries.ts:284`), and their model picker is free text plus
+  `KNOWN_PRESETS_BY_RUNNER` — the same path `pi` uses today. Live discovery over ACP (Gemini's
+  `unstable_setSessionModel` / ACP `session/set_model` imply a model list) is a named follow-up, not part of this
+  spec. Because `runnerDiscoversModels(runner: Runner)` takes the widened `Runner`, the phase's cockpit Step pins
+  the decision with a test (`runnerDiscoversModels('gemini') === false` and the picker renders free text + presets),
+  so the fallback is deliberate rather than discovered in e2e.
+- `GET /api/v1/health` `checks[].name` gains `gemini` / `copilot`. Health is the
   most externally depended-on shape (§2), and adding an enum member there is additive: consumers must already tolerate
   unknown check names, since `pi` did this in August. Workflow YAML `runner:` (§4) gains two values, and none is
   removed.
@@ -497,7 +575,7 @@ Text-only (U10). The deltas:
   line. If #807 lands first, Phase 0 absorbs `cursor` into the tuple instead, with no design change. This is a direction
   call, not a defect.
 - **Older cezar reading a newer `runs.json`** (§3). Today a downgrade after one run on a new runner wipes the whole index
-  on the next save (`store.ts:727-738`). Phase 0's per-record salvage fixes this for every later version. Versions
+  on the next save (`packages/cezar/src/runs/store.ts:723-740`). Phase 0's per-record salvage fixes this for every later version. Versions
   before Phase 0 keep the old behavior, and the Phase 2/3 CHANGELOG entries warn about it.
 - **Vendor churn.** Gemini's flags (`--yolo` → `--approval-mode`), auth policy, and ACP maturity in Copilot all moved
   in 2026. Every runner phase starts with a verification Step against the installed CLI, and fixtures cite the version.
@@ -506,7 +584,7 @@ Text-only (U10). The deltas:
   backend-specific prefixes and exact names only. No runner gains another runner's credentials. The Vertex unlock for `gemini` follows
   the existing toggle pattern, keyed on Gemini's own variable.
 - **Contract-package move (Phase 0).** `RUNNER_IDS` becomes a contract value the service imports at runtime. It rides
-  the existing `inline-contract.mjs` path, and `npm run test:package` proves the tarball still installs.
+  the existing `packages/cezar/scripts/inline-contract.mjs` path, and `npm run test:package` proves the tarball still installs.
 - **Rollback.** Phases 0 and 1 revert cleanly (no persisted state). After Phase 0, reverting Phase 2 or 3 is safe too: records carrying the
   removed runner id are preserved unread by the salvage path and come back if the phase is re-applied.
 - **Out of scope:** Antigravity CLI runner (named follow-up), Grok Option B, Kimi/GLM (#510/#511), routing through
@@ -540,11 +618,19 @@ Every Step leaves `npm run typecheck && npm test && npm run test:unit` green. Ev
    `route-parity`, `typed-bodies` green.
 4. Exhaustive `createRunner`, `resumeCommand`, open-in-app tables; tests pin "unknown id is a type error" (a
    `@ts-expect-error` case), today's outputs for every current id, and "runner-less record → `claude --resume`".
-5. `RunStore.open` per-record salvage. Tests: a file with one unknown-runner record loads the others, and the save
-   re-emits the unknown record byte-identically. Proven red against today's loader.
-6. Cockpit literal sites → `RUNNER_IDS` / `runnerSchema`; web unit tests for order-preserving filters.
-7. `runner-union.test.ts` guard. Prove it red by reintroducing one literal list (`git stash push -- <file>` recipe,
-   AGENTS.md), then green. Update `AGENT_PROTOCOL.md` §9 step 2/8 to say "add the id to `RUNNER_IDS` in
+5. `RunStore.open` per-record salvage (`packages/cezar/src/runs/store.ts`). Tests:
+   - a file with one unknown-runner record loads the others, and the save re-emits the unknown record
+     byte-identically and in `createdAt` order. Proven red against today's loader;
+   - `deleteRun(<salvaged id>)` returns `true`, removes its companions, and the record is absent after the next save;
+   - `pruneOldRuns` with more than `MAX_RUNS_KEPT` records, the oldest of them salvaged, prunes the salvaged ones
+     (prune does not skip salvaged records);
+   - an element with no string `id` / `createdAt` is dropped and counted in the warning.
+6. Cockpit literal sites → `RUNNER_IDS` / `runnerSchema`; web unit tests for order-preserving filters. Also
+   `e2e/new-task.e2e.ts:150` → `RUNNER_IDS.filter(…)` and `runner-model-catalog.ts` `unavailableReason` → a
+   `Record<RunnerId, string>` label table (test: `pi` no longer reads "OpenCode").
+7. `runner-union.test.ts` guard with the three-entry, rationale-carrying allowlist (§ Phase 0). Prove it red by
+   reintroducing one literal list and one ternary chain (`git stash push -- <file>` recipe, AGENTS.md), then green;
+   a test case pins that an allowlist entry with an empty rationale fails. Update `AGENT_PROTOCOL.md` §9 step 2/8 to say "add the id to `RUNNER_IDS` in
    `packages/contract/src/runners.ts`; typecheck and `runner-union.test.ts` list the rest".
 
 ### Phase 1 — codex declared providers (#583, #584)
@@ -562,8 +648,10 @@ Every Step leaves `npm run typecheck && npm test && npm run test:unit` green. Ev
 4. `AgentRunSpec.modelProvider` wired through one helper at **both** `startSession` sites (`run.ts:3664,4441`), fed by
    all three `configuredModelProvider` call sites (`run.ts:3594,3776,4406`); the codex version gate; the codex runner passes the override; the runner
    test asserts `modelProvider` on the `thread/start` and `thread/resume` payloads.
-5. `BACKEND_ALLOW_NAMES` + `extraNames` in `buildChildEnv`, from the user-scope provider's `env_key` / `env_http_headers`. Tests cover: a
-   project-scope provider contributes nothing; `XAI_API_KEY`
+5. `BACKEND_ALLOW_NAMES` + `extraNames` in `buildChildEnv`, from the user-scope provider's `env_key` /
+   `env_http_headers`, carried as `AgentRunSpec.forwardEnvNames` through the Step 4 helper →
+   `CodexAppServerRunner` → `spawnCodexAppServer` → `buildCodexAppServerEnv`. Tests cover: the runner test asserts the
+   names reach the spawned child's env (both `startSession` sites); a project-scope provider contributes nothing; `XAI_API_KEY`
    forwarded only when an xAI provider serves the run; an invalid name is ignored; the claude/opencode/pi envs are
    unchanged.
 6. Contract + route: `providers` on the config answer; the cockpit prefix chips and missing-key hint; web tests.
@@ -586,7 +674,10 @@ Every Step leaves `npm run typecheck && npm test && npm run test:unit` green. Ev
    `BACKEND_ALLOW_PREFIXES` + Vertex toggle; `CEZ_GEMINI_BIN` in `.env.example` + `docs/reference.md`.
 6. Model settings, `BACKEND_MODEL_MAP`, presets, catalog entry, `resumeCommand`, open-in-app, `PROFILE_ENV_VAR = null`;
    `ui-parity.test.ts` `BACKENDS` row; `AGENT_PROTOCOL.md` §4 gains an ACP column.
-7. Cockpit: runner pill, Settings → Agents row with the auth hint; e2e dry-run smoke (a task on `gemini` reaches
+7. Model discovery decision (§ API Contracts): `gemini` stays out of `modelDiscoveryRunnerSchema`. Web unit test
+   pins `runnerDiscoversModels('gemini') === false` and that the model picker offers free text plus
+   `KNOWN_PRESETS_BY_RUNNER.gemini` with no `/models` request.
+8. Cockpit: runner pill, Settings → Agents row with the auth hint; e2e dry-run smoke (a task on `gemini` reaches
    review, a follow-up resumes it). An opt-in real-CLI smoke test is skipped without `GEMINI_API_KEY`.
 
 ### Phase 3 — `copilot` runner (#582)
@@ -597,5 +688,7 @@ Every Step leaves `npm run typecheck && npm test && npm run test:unit` green. Ev
 2. `copilot-ui-mapper.ts` dialect + `__fixtures__/copilot/` covering every parity row.
 3. `copilot-acp-runner.ts` + `scripts/mock-copilot-acp.mjs`; follow-ups, cancel, resume via `session/load`;
    `--allow-all-tools` + the shared auto-answer.
-4. `'copilot'` in `RUNNER_IDS` and the rest of §9 (detection, auth, env, `CEZ_COPILOT_BIN`, presets, catalog,
+4. Model discovery decision (§ API Contracts): `copilot` stays out of `modelDiscoveryRunnerSchema`; the same web
+   unit test as Phase 2 Step 7 pins `runnerDiscoversModels('copilot') === false` and the free-text + presets picker.
+5. `'copilot'` in `RUNNER_IDS` and the rest of §9 (detection, auth, env, `CEZ_COPILOT_BIN`, presets, catalog,
    resume, open-in-app, `PROFILE_ENV_VAR = null`, parity row, cockpit rows, dry-run e2e, opt-in real smoke).
