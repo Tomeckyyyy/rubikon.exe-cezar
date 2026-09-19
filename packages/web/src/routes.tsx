@@ -33,6 +33,7 @@ import {
 } from './routes/settings/settings-shell'
 import { TasksOverviewRoute } from './routes/tasks-overview'
 import { GlobalTasksRoute } from './routes/global-tasks'
+import { MissionControlLoading } from './routes/mission-control/mission-control-loading'
 
 /** Lazy ON PURPOSE: the thread view carries the markdown stack (Streamdown + remark/rehype,
  *  ~140 KB gz) — as a static import it would sit in the main bundle every visitor pays for
@@ -46,6 +47,15 @@ const TaskThreadRoute = lazy(() =>
  *  full diffs through the Shiki singleton — thread-chunk weight the home screen must not pay. */
 const CompareVariantsRoute = lazy(() =>
   import('./routes/compare-variants').then((m) => ({ default: m.CompareVariantsRoute })),
+)
+
+/** Lazy ON PURPOSE (spec 2026-09-18-mission-control): Phase 3 adds `@xyflow/react` + `dagre` to
+ *  this route's own module graph, a dependency no other route needs — as a static import it
+ *  would sit in the main bundle every visitor pays for before ever opening Mission Control. */
+const MissionControlRoute = lazy(() =>
+  import('./routes/mission-control/mission-control-route').then((m) => ({
+    default: m.MissionControlRoute,
+  })),
 )
 
 /** Lazy because both tabs render the shared run header, which lives in the thread chunk
@@ -557,6 +567,20 @@ export const AppRoutes = memo(function AppRoutes() {
           keep redirecting to the boot project's thread (`LegacyPathRedirect` below owns it).
           React Router ranks this static segment above that `*`, so the two never compete. */}
       <Route path="/tasks" element={<GlobalTasksRoute />} />
+
+      {/* Mission Control (spec 2026-09-18-mission-control) — a second, purely front-end view of
+          the same cross-project run index, alongside `/tasks` and outside it for the identical
+          reason: a Grid/Swarm-Graph overview of "every project's work" scoped to one project is
+          a contradiction. Lazy because Phase 3 pulls in `@xyflow/react` + `dagre`, a dependency
+          this route alone needs. */}
+      <Route
+        path="/mission-control"
+        element={
+          <Suspense fallback={<MissionControlLoading />}>
+            <MissionControlRoute />
+          </Suspense>
+        }
+      />
 
       {/* Global settings (multi-project spec, step 3.5) — the one cockpit area that is NOT
           under `/p/:projectId`, because nothing here belongs to a project: appearance and

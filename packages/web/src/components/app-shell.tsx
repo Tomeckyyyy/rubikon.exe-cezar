@@ -4,6 +4,7 @@ import {
   LayersIcon,
   MenuIcon,
   PlusIcon,
+  RadarIcon,
   SearchIcon,
   SettingsIcon,
   XIcon,
@@ -555,6 +556,7 @@ function SidebarContent({
               wearing a second name. */}
           <div className="shrink-0 border-b border-border px-1.5 pt-0.5 pb-2">
             <AllTasksLink onNavigate={onNavigate} />
+            <MissionControlLink onNavigate={onNavigate} />
           </div>
           {/* Step 3.3: one collapsible group per registered project — nav + task list per group.
               The whole area scrolls as one (per the sidebar mockup); collapsed groups are one row. */}
@@ -690,6 +692,37 @@ function AllTasksLink({ onNavigate }: { onNavigate?: () => void }) {
         aria-hidden="true"
       />
       All tasks
+    </RouterLink>
+  )
+}
+
+/**
+ * The way into Mission Control (`/mission-control`, spec 2026-09-18-mission-control) — the
+ * Grid/Swarm-Graph overview of every run in flight, across every project.
+ *
+ * Same reasoning as `AllTasksLink` right above it: a PLAIN router Link (the route sits outside
+ * every `/p/:projectId`) and its own icon (`RadarIcon`) so the two "every project" doors never
+ * visually collide.
+ */
+function MissionControlLink({ onNavigate }: { onNavigate?: () => void }) {
+  const { pathname } = useLocation()
+  const isActive = pathname === '/mission-control'
+  return (
+    <RouterLink
+      to="/mission-control"
+      data-slot="mission-control-link"
+      onClick={onNavigate}
+      aria-current={isActive ? 'page' : undefined}
+      className={cn(
+        'flex h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-[13.5px] font-semibold text-foreground transition-colors hover:bg-muted md:h-9',
+        isActive && 'bg-muted',
+      )}
+    >
+      <RadarIcon
+        className={cn('size-4 shrink-0', isActive ? 'text-violet' : 'text-violet/70')}
+        aria-hidden="true"
+      />
+      Mission Control
     </RouterLink>
   )
 }

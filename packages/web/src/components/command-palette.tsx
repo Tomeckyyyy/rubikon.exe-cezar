@@ -1,4 +1,4 @@
-import { CheckIcon, FolderOpenIcon, LayersIcon, MoonIcon, PlusIcon } from 'lucide-react'
+import { CheckIcon, FolderOpenIcon, LayersIcon, MoonIcon, PlusIcon, RadarIcon } from 'lucide-react'
 import * as React from 'react'
 import { useNavigate as useRouterNavigate } from 'react-router'
 import { useHealth, useProjects, useRuns, useRunsIndex, useSkills, useUiState } from '@/api/queries'
@@ -450,6 +450,20 @@ function PaletteContent({ close }: { close: () => void }) {
             >
               <LayersIcon aria-hidden="true" />
               All tasks
+            </CommandItem>
+          ) : null}
+          {/* Mission Control's own door — same guard, same reasoning: a Grid/Swarm-Graph
+              overview of "every project's runs" is only worth reaching for with more than one
+              project registered. */}
+          {multiProject ? (
+            <CommandItem
+              value="view Mission Control"
+              data-slot="palette-view"
+              data-nav-to="/mission-control"
+              onSelect={() => goGlobal('/mission-control')}
+            >
+              <RadarIcon aria-hidden="true" />
+              Mission Control
             </CommandItem>
           ) : null}
           {visibleNavItems({
