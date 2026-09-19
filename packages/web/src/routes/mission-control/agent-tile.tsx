@@ -91,7 +91,7 @@ export const AgentTile = React.forwardRef<HTMLAnchorElement, AgentTileProps>(fun
           paint.tone === 'pending' && 'bg-pending',
           paint.tone === 'danger' && 'bg-danger',
           paint.tone === 'neutral' && 'bg-border',
-          paint.pulse && (paint.slow ? 'motion-safe:animate-[pulse_3s_ease-in-out_infinite]' : 'motion-safe:animate-pulse'),
+          paint.pulse && 'motion-safe:animate-pulse',
         )}
       />
 

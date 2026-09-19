@@ -1,5 +1,6 @@
 import type { RunEvent, RunIndexEntry, RunStatus } from '@open-mercato/cezar-api-client'
 
+import { deriveAttention, type AttentionInput } from '@/lib/attention'
 import { buildTaskTree, flattenTaskTree } from '@/lib/task-tree'
 import type { StatusDotTone } from '@/components/status-dot'
 
@@ -20,7 +21,7 @@ export function isActiveRun(run: Pick<RunIndexEntry, 'status'>): boolean {
 
 /**
  * Active runs first (order preserved), finished runs after (order preserved) — what feeds the
- * Grid's "active" section and its default-collapsed "recently finished" one. A stable partition,
+ * Grid's active sections and its default-collapsed "recently finished" one. A stable partition,
  * not a re-sort: which active run is "first" is the caller's own ordering (`runs-index` order),
  * exactly like `taskTreeRows` refuses to re-sort what it nests.
  */
@@ -33,43 +34,40 @@ export function splitActiveRuns<T extends Pick<RunIndexEntry, 'status'>>(
   return { active, finished }
 }
 
-/** One tile's status paint: the dot tone, whether it pulses, and — for `running` vs `queued`,
- *  which both pulse — whether that pulse should read SLOWER, so a queued tile does not compete
- *  with a running one for attention. */
-export interface TileStatusPaint {
-  tone: StatusDotTone
-  pulse: boolean
-  /** Only meaningful when `pulse` is true. */
-  slow: boolean
-  label: string
+/** `waiting`/`review` — the same two statuses `lib/task-groups.ts`'s `bucketOf` calls "Needs you"
+ *  for the sidebar quick-list. Named and split out here so the Grid can put a run that is
+ *  actually asking for a person ahead of the fifteen others that are simply busy — the board's
+ *  whole point is triage, and a flat "Active" pile that treats "blocked on you" and "working fine
+ *  on its own" as the same thing asks the viewer to do that sorting by eye instead. */
+export function needsYouRun(run: Pick<RunIndexEntry, 'status'>): boolean {
+  return run.status === 'waiting' || run.status === 'review'
 }
 
+/** Splits an already-active list (`splitActiveRuns`'s own `active`) into "Needs you" and
+ *  "Working" — order preserved within each, same stable-partition contract as `splitActiveRuns`. */
+export function splitByAttention<T extends Pick<RunIndexEntry, 'status'>>(
+  runs: readonly T[],
+): { needsYou: T[]; working: T[] } {
+  const needsYou: T[] = []
+  const working: T[] = []
+  for (const run of runs) (needsYouRun(run) ? needsYou : working).push(run)
+  return { needsYou, working }
+}
+
+export type TileStatusPaint = { tone: StatusDotTone; pulse: boolean; label: string }
+
 /**
- * Status → tile paint, straight off `RunIndexEntry.status` (spec UI/UX → Grid/Radar): a pulsing
- * border for `running`, a slower pulse for `queued`, an amber ("pending") accent for
- * `waiting`/`review`, static for every terminal state. Deliberately simpler than
- * `lib/attention.ts`'s `deriveAttention` (which layers in permission prompts and auto-resume
- * scheduling for the Tasks table's "needs you" language) — a tile names the RAW run status, not
- * an attention verdict, so a glance at fifty tiles reads as "what state is each one actually in".
+ * Status → tile paint, via `lib/attention.ts`'s `deriveAttention` — the SAME function the sidebar
+ * dot, the Tasks table dot and the thread header use, so "violet pulsing" means "running" and
+ * "amber" means "needs you" here exactly as it does everywhere else in the cockpit. An earlier
+ * version of this function painted its own status→color table (`running` green, `waiting` AND
+ * `review` both amber) that quietly disagreed with the rest of the app — and with Swarm Graph's
+ * own in-flight edges, which were already violet. A viewer who has learned the app's status
+ * colors elsewhere should not have to relearn a second palette just for this one board.
  */
-export function tileStatusPaint(run: Pick<RunIndexEntry, 'status'>): TileStatusPaint {
-  switch (run.status) {
-    case 'running':
-      return { tone: 'success', pulse: true, slow: false, label: 'running' }
-    case 'queued':
-      return { tone: 'pending', pulse: true, slow: true, label: 'queued' }
-    case 'waiting':
-      return { tone: 'pending', pulse: true, slow: false, label: 'needs you' }
-    case 'review':
-      return { tone: 'pending', pulse: true, slow: false, label: 'needs review' }
-    case 'failed':
-      return { tone: 'danger', pulse: false, slow: false, label: 'failed' }
-    case 'cancelled':
-      return { tone: 'neutral', pulse: false, slow: false, label: 'cancelled' }
-    case 'done':
-    default:
-      return { tone: 'neutral', pulse: false, slow: false, label: 'done' }
-  }
+export function tileStatusPaint(run: AttentionInput): TileStatusPaint {
+  const attention = deriveAttention(run)
+  return { tone: attention.tone, pulse: attention.pulse, label: attention.label }
 }
 
 /**

@@ -5,7 +5,9 @@ import type { RunEvent, RunIndexEntry } from '@open-mercato/cezar-api-client'
 import {
   isActiveRun,
   lastToolCallTitle,
+  needsYouRun,
   splitActiveRuns,
+  splitByAttention,
   subtaskCounts,
   tileStatusPaint,
 } from './mission-control'
@@ -23,27 +25,48 @@ function run(overrides: Partial<RunIndexEntry> & { id: string }): RunIndexEntry 
 }
 
 describe('tileStatusPaint', () => {
-  it('paints running as a fast, non-slow pulse', () => {
+  // These assertions mirror `lib/attention.test.ts`'s own — tileStatusPaint is now a thin wrapper
+  // around `deriveAttention`, and the point of that change is that the two can never disagree.
+  it('paints running as a pulsing violet, matching the app-wide "in progress" color', () => {
     expect(tileStatusPaint({ status: 'running' })).toEqual({
-      tone: 'success',
+      tone: 'violet',
       pulse: true,
-      slow: false,
       label: 'running',
     })
   })
 
-  it('paints queued as a slower pulse than running', () => {
-    const paint = tileStatusPaint({ status: 'queued' })
-    expect(paint.pulse).toBe(true)
-    expect(paint.slow).toBe(true)
+  it('paints queued as static, not pulsing — parked, not transitioning', () => {
+    expect(tileStatusPaint({ status: 'queued' }).pulse).toBe(false)
   })
 
-  it.each(['waiting', 'review'] as const)('paints %s with an amber (pending) accent', (status) => {
-    expect(tileStatusPaint({ status }).tone).toBe('pending')
+  it('paints waiting amber and review violet — distinct, not the same accent', () => {
+    expect(tileStatusPaint({ status: 'waiting' }).tone).toBe('pending')
+    expect(tileStatusPaint({ status: 'review' }).tone).toBe('violet')
   })
 
   it.each(['done', 'failed', 'cancelled'] as const)('paints terminal status %s as static', (status) => {
     expect(tileStatusPaint({ status }).pulse).toBe(false)
+  })
+})
+
+describe('needsYouRun / splitByAttention', () => {
+  it('treats only waiting/review as needing the person at the keyboard', () => {
+    expect(needsYouRun(run({ id: 'a', status: 'waiting' }))).toBe(true)
+    expect(needsYouRun(run({ id: 'b', status: 'review' }))).toBe(true)
+    expect(needsYouRun(run({ id: 'c', status: 'running' }))).toBe(false)
+    expect(needsYouRun(run({ id: 'd', status: 'queued' }))).toBe(false)
+  })
+
+  it('preserves order within each half', () => {
+    const runs = [
+      run({ id: 'r1', status: 'running' }),
+      run({ id: 'r2', status: 'waiting' }),
+      run({ id: 'r3', status: 'queued' }),
+      run({ id: 'r4', status: 'review' }),
+    ]
+    const { needsYou, working } = splitByAttention(runs)
+    expect(needsYou.map((r) => r.id)).toEqual(['r2', 'r4'])
+    expect(working.map((r) => r.id)).toEqual(['r1', 'r3'])
   })
 })
 

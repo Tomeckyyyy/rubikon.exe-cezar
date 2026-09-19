@@ -79,4 +79,17 @@ describe('MissionControlGrid', () => {
     renderGrid([run({ id: 'run-a', status: 'queued' })])
     expect(screen.getByRole('link', { name: /run-a/ }).getAttribute('data-status')).toBe('queued')
   })
+
+  it('puts a waiting/review run under its own "Needs you" heading, ahead of merely-running work', () => {
+    const { container } = renderGrid([
+      run({ id: 'run-running', status: 'running' }),
+      run({ id: 'run-waiting', status: 'waiting' }),
+    ])
+    expect(screen.queryByText('Needs you')).not.toBeNull()
+    const needsYouSection = container.querySelector('[data-slot="mission-control-needs-you"]')
+    const workingSection = container.querySelector('[data-slot="mission-control-working"]')
+    expect(needsYouSection?.textContent).toContain('run-waiting')
+    expect(workingSection?.textContent).toContain('run-running')
+    expect(workingSection?.textContent).not.toContain('run-waiting')
+  })
 })

@@ -4,6 +4,7 @@ import * as React from 'react'
 import { useProjects, useRunsIndex } from '@/api/queries'
 import { CenteredState } from '@/components/centered-state'
 import { truncatedProjectNames } from '@/lib/global-tasks'
+import { needsYouRun } from '@/lib/mission-control'
 import { useMissionControlView, type MissionControlView } from '@/lib/use-mission-control-view'
 import { cn } from '@/lib/utils'
 
@@ -41,6 +42,10 @@ export function MissionControlRoute() {
     () => truncatedProjectNames(index.data?.truncated ?? [], registry),
     [index.data, registry],
   )
+  const needsYouCount = React.useMemo(
+    () => (index.data?.runs ?? []).filter(needsYouRun).length,
+    [index.data],
+  )
 
   if (index.isError || projects.isError) {
     return (
@@ -60,6 +65,17 @@ export function MissionControlRoute() {
       <header className="sticky top-0 z-10 hidden h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-5 md:flex">
         <h1 className="text-base font-semibold">Mission Control</h1>
         <ViewToggle view={view} onChange={setView} />
+        {needsYouCount > 0 ? (
+          // The one number a person opening this page actually wants first: not "how many
+          // agents exist" but "how many of them are stuck on ME right now" — the run count to
+          // its right already answers the first question.
+          <span
+            data-slot="mission-control-needs-you-count"
+            className="rounded-full bg-pending/15 px-2 py-0.5 text-[12px] font-medium text-pending-strong tabular-nums"
+          >
+            {needsYouCount} need{needsYouCount === 1 ? 's' : ''} you
+          </span>
+        ) : null}
         <div className="flex-1" />
         <span data-slot="mission-control-count" className="text-[12.5px] text-soft-foreground tabular-nums">
           {index.data?.runs.length ?? 0} runs

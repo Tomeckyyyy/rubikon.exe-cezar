@@ -4,7 +4,7 @@ import * as React from 'react'
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
 import { CenteredState } from '@/components/centered-state'
-import { splitActiveRuns, subtaskCounts } from '@/lib/mission-control'
+import { splitActiveRuns, splitByAttention, subtaskCounts } from '@/lib/mission-control'
 import { cn } from '@/lib/utils'
 
 import { AgentTile } from './agent-tile'
@@ -12,7 +12,13 @@ import { useVisibleRunEvents } from './use-visible-run-events'
 
 /**
  * The Grid/Radar view (spec 2026-09-18-mission-control, "UI/UX → Grid/Radar"): a responsive tile
- * grid, active runs on top, finished ones collapsed into a default-hidden section.
+ * grid, triaged the same way the sidebar quick-list triages a single project's tasks (`lib/task-
+ * groups.ts`'s `bucketOf`) — "Needs you" (waiting/review) ahead of "Working" (running/queued),
+ * finished runs collapsed into a default-hidden section. A board with dozens of tiles is only as
+ * useful as the time it takes to answer "which of these is actually blocked on ME" — a flat
+ * "Active" pile that gives a run quietly running and a run stuck on a question the same visual
+ * weight makes the viewer do that triage by eye, tile by tile, which defeats the point of a
+ * glanceable board.
  *
  * Presentational and self-contained: `mission-control-route.tsx` owns fetching (`useRunsIndex`)
  * and passes the resolved `RunIndexEntry[]`/registry down, so this component is just as testable
@@ -33,6 +39,7 @@ export function MissionControlGrid({
 }) {
   const byId = React.useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const { active, finished } = React.useMemo(() => splitActiveRuns(runs), [runs])
+  const { needsYou, working } = React.useMemo(() => splitByAttention(active), [active])
   const counts = React.useMemo(() => subtaskCounts(runs), [runs])
   const [showFinished, setShowFinished] = React.useState(false)
 
@@ -50,20 +57,36 @@ export function MissionControlGrid({
 
   return (
     <div data-slot="mission-control-grid" className="flex flex-col gap-4">
-      {active.length > 0 ? (
-        <section data-slot="mission-control-active" aria-label="Active runs">
-          {finished.length > 0 ? (
-            // Only shown once there's a second section to distinguish it from — with nothing
-            // finished yet, "Active" would be the only heading on the page and just adds noise.
+      {needsYou.length > 0 ? (
+        <section data-slot="mission-control-needs-you" aria-label="Needs you">
+          <p className="mb-2 text-[12px] font-semibold tracking-[0.04em] text-pending-strong uppercase">
+            Needs you
+          </p>
+          <Tiles
+            runs={needsYou}
+            byId={byId}
+            counts={counts}
+            observeVisibility
+            highlightedRunId={highlightedRunId}
+            onHighlightRun={onHighlightRun}
+          />
+        </section>
+      ) : null}
+
+      {working.length > 0 ? (
+        <section data-slot="mission-control-working" aria-label="Working">
+          {(needsYou.length > 0 || finished.length > 0) ? (
+            // Only shown once there's another section to distinguish it from — with nothing else
+            // on the page, "Working" would be the sole heading and just adds noise.
             <p className="mb-2 text-[12px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
-              Active
+              Working
             </p>
           ) : null}
           {/* Only ACTIVE tiles ever observe their own visibility (Phase 2): a finished run is
               never `running`, so `useVisibleRunEvents` on one would just be an idle
               IntersectionObserver paying rent for nothing. */}
           <Tiles
-            runs={active}
+            runs={working}
             byId={byId}
             counts={counts}
             observeVisibility
