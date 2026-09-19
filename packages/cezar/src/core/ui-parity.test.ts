@@ -95,7 +95,10 @@ const CAPABILITIES: ReadonlyArray<[name: string, produced: (events: UiEvent[]) =
  * `write_todos` exists only for Gemini 2 models and its frames carry just the title "Set N todo(s)"
  * (no `rawInput`, empty `content`); Gemini 3 — the default routing — has no plan tool at all
  * (`__fixtures__/gemini/README.md`, `write-todos-quota.ndjson`). Spec 2026-09-19 Phase 2 assumed a
- * `write_todos` input to read; the real CLI does not provide one. OPEN DESIGN POINT (#581).
+ * `write_todos` input to read; the real CLI does not provide one. Decided for #581: accept the gap
+ * rather than read Gemini's private chat recording (Gemini-2-only, vendor-internal format) or add a
+ * new cezar plan marker. The dock stays empty for Gemini until Gemini sends plans over ACP; the
+ * shared mapper already maps an ACP `plan` update, so that day needs only this entry removed.
  */
 const WIRE_GAPS: Partial<Record<(typeof BACKENDS)[number], readonly string[]>> = {
   gemini: ['plan.updated with entries (TodoWrite / todoList / todowrite)'],
