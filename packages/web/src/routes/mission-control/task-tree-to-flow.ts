@@ -34,6 +34,12 @@ export interface MissionControlFlowEdge {
   /** `true` while the CHILD is still in flight — the spec's "animated for a still-running
    *  branch, static once it finished" rule. */
   animated: boolean
+  /** React Flow's own default edge stroke reads as near-invisible against this app's dark
+   *  background (its default theme assumes a white canvas) — CSS variables, not literal
+   *  colors, so the edge repaints correctly if the viewer's theme is light. An in-flight
+   *  branch gets the same violet the rest of the app reserves for "needs attention /
+   *  in progress"; a settled one gets the quiet border-ish gray every other muted line uses. */
+  style: { stroke: string; strokeWidth: number }
 }
 
 /** The tile footprint dagre lays out against — must match the actual rendered size closely
@@ -94,11 +100,15 @@ function layoutOneTree(
   for (const node of flat) {
     for (const child of node.children) {
       graph.setEdge(node.run.id, child.run.id)
+      const animated = isInFlight(child.run)
       edges.push({
         id: `${node.run.id}->${child.run.id}`,
         source: node.run.id,
         target: child.run.id,
-        animated: isInFlight(child.run),
+        animated,
+        style: animated
+          ? { stroke: 'var(--violet)', strokeWidth: 2 }
+          : { stroke: 'var(--soft-foreground)', strokeWidth: 1.5 },
       })
     }
   }

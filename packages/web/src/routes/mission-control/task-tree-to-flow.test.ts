@@ -56,9 +56,13 @@ describe('taskTreeToFlow', () => {
       run({ id: 'done-child', status: 'done', dispatch: { rootRunId: 'root', parentRunId: 'root', kind: 'review' } }),
     ]
     const { edges } = taskTreeToFlow(runs)
-    const byTarget = new Map(edges.map((e) => [e.target, e.animated]))
-    expect(byTarget.get('running-child')).toBe(true)
-    expect(byTarget.get('done-child')).toBe(false)
+    const byTarget = new Map(edges.map((e) => [e.target, e]))
+    expect(byTarget.get('running-child')!.animated).toBe(true)
+    expect(byTarget.get('done-child')!.animated).toBe(false)
+    // A different stroke too — an in-flight branch and a settled one must not read as the same
+    // line at a glance (react-flow's default stroke is near-invisible on this app's dark
+    // background; found by actually rendering the graph in a browser).
+    expect(byTarget.get('running-child')!.style.stroke).not.toBe(byTarget.get('done-child')!.style.stroke)
   })
 
   it('carries the whole run on each node for the custom node renderer', () => {
