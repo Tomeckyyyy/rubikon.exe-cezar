@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { RunEvent, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
 import {
+  fleetTotals,
   isActiveRun,
   lastToolCallTitle,
   needsYouRun,
@@ -89,6 +90,47 @@ describe('sortByAge', () => {
     const runs = [run({ id: 'a', createdAt: '2026-09-19T00:02:00.000Z' }), run({ id: 'b', createdAt: '2026-09-19T00:01:00.000Z' })]
     sortByAge(runs)
     expect(runs.map((r) => r.id)).toEqual(['a', 'b'])
+  })
+})
+
+describe('fleetTotals', () => {
+  it('sums cost only across runs still in flight, not finished ones', () => {
+    const runs = [
+      run({ id: 'a', status: 'running', costUsd: 1.5 }),
+      run({ id: 'b', status: 'waiting', costUsd: 0.5 }),
+      run({ id: 'c', status: 'done', costUsd: 9 }),
+    ]
+    expect(fleetTotals(runs).activeCostUsd).toBe(2)
+  })
+
+  it('counts every run into exactly one status bucket', () => {
+    const runs = [
+      run({ id: 'a', status: 'waiting' }),
+      run({ id: 'b', status: 'review' }),
+      run({ id: 'c', status: 'running' }),
+      run({ id: 'd', status: 'queued' }),
+      run({ id: 'e', status: 'done' }),
+      run({ id: 'f', status: 'failed' }),
+      run({ id: 'g', status: 'cancelled' }),
+    ]
+    expect(fleetTotals(runs).statusCounts).toEqual({
+      needsYou: 2,
+      working: 2,
+      done: 1,
+      failed: 1,
+      cancelled: 1,
+    })
+  })
+
+  it('totals cost per project across BOTH active and finished runs', () => {
+    const runs = [
+      run({ id: 'a', projectId: 'api', status: 'running', costUsd: 1 }),
+      run({ id: 'b', projectId: 'api', status: 'done', costUsd: 2 }),
+      run({ id: 'c', projectId: 'web', status: 'done', costUsd: 5 }),
+    ]
+    const { costByProject } = fleetTotals(runs)
+    expect(costByProject.get('api')).toBe(3)
+    expect(costByProject.get('web')).toBe(5)
   })
 })
 

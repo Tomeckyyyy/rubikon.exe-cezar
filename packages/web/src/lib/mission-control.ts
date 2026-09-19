@@ -85,6 +85,50 @@ export function tileStatusPaint(run: AttentionInput): TileStatusPaint {
   return { tone: attention.tone, pulse: attention.pulse, label: attention.label }
 }
 
+/** One bucket per row of the fleet's status distribution bar — the same four ideas `deriveAttention`
+ *  already ranks (needs you > working > a settled outcome), just counted instead of per-run. */
+export interface FleetStatusCounts {
+  needsYou: number
+  working: number
+  done: number
+  failed: number
+  cancelled: number
+}
+
+export interface FleetTotals {
+  /** Sum of `costUsd` across runs still IN FLIGHT — "what am I spending right now", not a
+   *  lifetime total that would keep climbing long after every agent went quiet. */
+  activeCostUsd: number
+  statusCounts: FleetStatusCounts
+  /** Lifetime cost per project, across every run in the index (active and finished) — the
+   *  question "which project has actually cost me the most" has no "right now" version. */
+  costByProject: Map<string, number>
+}
+
+/**
+ * Every run in the index, reduced to what the fleet-level readout at the top of Mission Control
+ * needs (spec follow-up: "management," not just triage) — one pass, pure, so it is testable
+ * without mounting anything and cheap enough to recompute on every `runs-index` tick.
+ */
+export function fleetTotals(runs: readonly RunIndexEntry[]): FleetTotals {
+  let activeCostUsd = 0
+  const statusCounts: FleetStatusCounts = { needsYou: 0, working: 0, done: 0, failed: 0, cancelled: 0 }
+  const costByProject = new Map<string, number>()
+
+  for (const run of runs) {
+    const active = isActiveRun(run)
+    if (active) activeCostUsd += run.costUsd ?? 0
+    if (needsYouRun(run)) statusCounts.needsYou += 1
+    else if (active) statusCounts.working += 1
+    else if (run.status === 'failed') statusCounts.failed += 1
+    else if (run.status === 'cancelled') statusCounts.cancelled += 1
+    else statusCounts.done += 1
+    if (run.costUsd) costByProject.set(run.projectId, (costByProject.get(run.projectId) ?? 0) + run.costUsd)
+  }
+
+  return { activeCostUsd, statusCounts, costByProject }
+}
+
 /**
  * Direct-child dispatch counts for every run in `runs`, keyed by run id — the tile's "N subtasks"
  * badge. Built once per render off the same `buildTaskTree` every other list already reuses, so

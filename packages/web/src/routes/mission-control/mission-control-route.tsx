@@ -1,14 +1,17 @@
 import { LayersIcon, LoaderCircleIcon } from 'lucide-react'
 import * as React from 'react'
 
-import { useProjects, useRunsIndex } from '@/api/queries'
+import { useHealth, useProjects, useRunsIndex } from '@/api/queries'
 import { CenteredState } from '@/components/centered-state'
 import { truncatedProjectNames } from '@/lib/global-tasks'
-import { needsYouRun } from '@/lib/mission-control'
+import { fleetTotals, needsYouRun } from '@/lib/mission-control'
+import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useMissionControlView, type MissionControlView } from '@/lib/use-mission-control-view'
 import { cn } from '@/lib/utils'
 
+import { MissionControlFleet } from './mission-control-fleet'
 import { MissionControlGrid } from './mission-control-grid'
+import { useFleetCostHistory } from './use-fleet-cost-history'
 
 /** Lazy ON PURPOSE, split from the route's own chunk (spec 2026-09-18-mission-control,
  *  Architecture): `@xyflow/react` + `dagre` are a dependency this ONE view needs, and Grid-only
@@ -46,6 +49,12 @@ export function MissionControlRoute() {
     () => (index.data?.runs ?? []).filter(needsYouRun).length,
     [index.data],
   )
+  const metrics = usageMetricVisibility(useHealth().data)
+  // `activeCostUsd` alone, not the whole `FleetTotals` object — the object is a fresh reference
+  // every render, which would restart the cost-history sample rather than only append when the
+  // NUMBER actually changes (`useFleetCostHistory`'s own guard, which compares by value).
+  const activeCostUsd = React.useMemo(() => fleetTotals(index.data?.runs ?? []).activeCostUsd, [index.data])
+  const costHistory = useFleetCostHistory(activeCostUsd)
 
   if (index.isError || projects.isError) {
     return (
@@ -92,6 +101,15 @@ export function MissionControlRoute() {
             Showing the newest {index.data?.perProjectLimit} tasks per project — older ones in{' '}
             {truncated.join(', ')} are only in that project&rsquo;s own Tasks page.
           </p>
+        ) : null}
+
+        {index.data ? (
+          <MissionControlFleet
+            runs={index.data.runs}
+            projects={registry}
+            costHistory={costHistory}
+            showCost={metrics.cost}
+          />
         ) : null}
 
         {index.data === undefined ? null : view === 'graph' ? (
