@@ -6216,7 +6216,10 @@ export function isSafeSessionId(sessionId: string): boolean {
  */
 export function resumeCommand(runner: string | undefined, sessionId: string): string | null {
   if (!isSafeSessionId(sessionId)) return null;
+  if (runner === undefined || runner === 'claude-cli') runner = 'claude';
   switch (runner) {
+    case 'claude':
+      return `claude --resume ${sessionId}`;
     case 'codex':
       return `codex resume ${sessionId}`;
     case 'opencode':
@@ -6224,6 +6227,6 @@ export function resumeCommand(runner: string | undefined, sessionId: string): st
     case 'pi':
       return `pi --session ${sessionId}`;
     default:
-      return `claude --resume ${sessionId}`;
+      return null;
   }
 }

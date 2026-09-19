@@ -146,8 +146,8 @@ const composerDefaultsSchema = z
 const agentDefaultsSchema = z
   .object({
     runner: z.enum(PROVIDER_IDS).optional().catch(undefined),
-    models: z
-      perRunner(z.string().trim().min(1).max(200).optional().catch(undefined)).partial()
+    models: perRunner(z.string().trim().min(1).max(200).optional().catch(undefined))
+      .partial()
       .passthrough()
       .optional()
       .catch(undefined),
