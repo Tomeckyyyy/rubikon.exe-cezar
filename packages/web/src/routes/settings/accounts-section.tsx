@@ -23,6 +23,7 @@ import {
 } from '@/api/queries'
 import {
   agentAccountRouteId,
+  RUNNER_IDS,
   type AgentProfile,
   type AgentProfilesResponse,
   type BackendCheck,
@@ -144,7 +145,7 @@ function AccountsPane({ data }: { data: AgentProfilesResponse }) {
   // Every agent gets a tab, including one that cannot carry a second login: the tab is where its
   // install state and config folder live, and hiding OpenCode would just move the question
   // "is OpenCode set up?" somewhere else.
-  const providers: ProviderId[] = ['claude', 'codex', 'opencode', 'pi']
+  const providers: ProviderId[] = [...RUNNER_IDS]
 
   if (!data.editable) {
     return (
