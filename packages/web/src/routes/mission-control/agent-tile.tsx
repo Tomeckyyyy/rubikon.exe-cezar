@@ -4,6 +4,7 @@ import { Link } from 'react-router'
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
 import { StatusDot } from '@/components/status-dot'
+import { shortAge } from '@/lib/format'
 import { tileStatusPaint } from '@/lib/mission-control'
 import { formatCost } from '@/lib/tasks-table'
 import { runTitle } from '@/lib/task-groups'
@@ -39,10 +40,11 @@ export interface AgentTileProps {
    *  tile's own status color instead of fighting it. Survives a Grid⇄Graph switch because the
    *  route (not either view) owns the state. */
   highlighted?: boolean
-  /** Fired on hover/focus, never on click — a tile's click is its navigation, and highlighting
-   *  must not compete with that. This is what lets the route's `highlightedRunId` follow the
-   *  pointer/keyboard without an extra control to operate. */
-  onHighlight?: (runId: string) => void
+  /** Fired on hover/focus (a run id) AND on leave/blur (`undefined`), never on click — a tile's
+   *  click is its navigation, and highlighting must not compete with that. This is what lets the
+   *  route's `highlightedRunId` follow the pointer/keyboard, including OFF a tile, without an
+   *  extra control to operate. */
+  onHighlight?: (runId: string | undefined) => void
 }
 
 /** `ref` forwards to the rendered `<a>` — `use-visible-run-events.ts`'s IntersectionObserver
@@ -55,8 +57,21 @@ export const AgentTile = React.forwardRef<HTMLAnchorElement, AgentTileProps>(fun
   const paint = tileStatusPaint(run)
   const title = runTitle(run)
   const cost = formatCost(run.costUsd)
+  // `startedAt` over `createdAt` when both exist — the global Tasks page's own age column
+  // preference (`lib/global-tasks.ts`): how long the AGENT has actually been on this, not how
+  // long it sat in a create-task form. This is the one number that turns eighteen identical
+  // amber "needs you" tiles into an actual queue — the oldest is the one to open first.
+  const age = shortAge(run.startedAt ?? run.createdAt)
   const to = scopeTo(run.projectId, `/tasks/${run.id}`)
-  const highlight = onHighlight ? () => onHighlight(run.id) : undefined
+  const highlightOn = onHighlight ? () => onHighlight(run.id) : undefined
+  // Without this, a hovered tile stayed ringed forever — `onHighlight` only ever SET a run id,
+  // nothing ever cleared it, so the ring followed the pointer onto a tile and then just sat there
+  // once the pointer left the grid entirely. Clearing unconditionally on leave/blur is safe even
+  // when the pointer moves straight from this tile onto the next one: the browser fires this
+  // tile's `mouseleave` before the next tile's `mouseenter`, and React batches both state updates
+  // into the one commit that actually paints — so the ring still ends up on the tile the pointer
+  // is actually over, never stuck and never flickering off first.
+  const highlightOff = onHighlight ? () => onHighlight(undefined) : undefined
 
   return (
     <Link
@@ -68,8 +83,10 @@ export const AgentTile = React.forwardRef<HTMLAnchorElement, AgentTileProps>(fun
       data-status={run.status}
       data-highlighted={highlighted || undefined}
       title={title}
-      onMouseEnter={highlight}
-      onFocus={highlight}
+      onMouseEnter={highlightOn}
+      onMouseLeave={highlightOff}
+      onFocus={highlightOn}
+      onBlur={highlightOff}
       className={cn(
         // A dozens-of-tiles-at-once board reads status by SCANNING, not reading — the reason this
         // tile carries a stronger status signal (a full-height edge, not just the dot the design
@@ -124,12 +141,20 @@ export const AgentTile = React.forwardRef<HTMLAnchorElement, AgentTileProps>(fun
             <span className="truncate">{run.workflow}</span>
           </>
         )}
+        {age ? (
+          <span data-slot="agent-tile-age" className="ml-auto shrink-0 font-mono tabular-nums">
+            {age}
+          </span>
+        ) : null}
       </span>
 
-      {!compact && (cost || run.usage) ? (
+      {!compact && (cost || (run.usage && run.usage.cpuPct > 0)) ? (
         <span className="flex items-center gap-2 font-mono text-[11px] text-muted-foreground tabular-nums">
           {cost ? <span data-slot="agent-tile-cost">{cost}</span> : null}
-          {run.usage ? (
+          {/* 0% is not a measurement worth a reader's attention — it is what almost every sampled
+           *  tick reads between bursts of real work, so printing it on every tile just crowds out
+           *  the row for the rare tile where CPU is actually saying something. */}
+          {run.usage && run.usage.cpuPct > 0 ? (
             <span data-slot="agent-tile-usage">
               {run.usage.cpuPct.toFixed(0)}% CPU
             </span>

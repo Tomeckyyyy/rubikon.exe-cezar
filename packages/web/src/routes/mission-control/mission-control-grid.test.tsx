@@ -80,6 +80,16 @@ describe('MissionControlGrid', () => {
     expect(screen.getByRole('link', { name: /run-a/ }).getAttribute('data-status')).toBe('queued')
   })
 
+  it('orders "Needs you" oldest first — the run that has waited longest comes first, not last', () => {
+    const { container } = renderGrid([
+      run({ id: 'just-asked', status: 'waiting', createdAt: '2026-09-19T00:05:00.000Z' }),
+      run({ id: 'been-waiting-a-while', status: 'waiting', createdAt: '2026-09-19T00:01:00.000Z' }),
+    ])
+    const tiles = container.querySelectorAll('[data-slot="agent-tile"]')
+    expect(tiles[0]!.getAttribute('data-run-id')).toBe('been-waiting-a-while')
+    expect(tiles[1]!.getAttribute('data-run-id')).toBe('just-asked')
+  })
+
   it('puts a waiting/review run under its own "Needs you" heading, ahead of merely-running work', () => {
     const { container } = renderGrid([
       run({ id: 'run-running', status: 'running' }),

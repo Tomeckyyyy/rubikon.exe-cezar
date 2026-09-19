@@ -18,7 +18,7 @@ import { taskTreeToFlow, type MissionControlFlowNodeData } from './task-tree-to-
 interface DecoratedNodeData extends MissionControlFlowNodeData {
   project?: ProjectListEntry
   highlighted: boolean
-  onHighlight?: (runId: string) => void
+  onHighlight?: (runId: string | undefined) => void
 }
 
 /**
@@ -39,7 +39,7 @@ export function MissionControlGraph({
   runs: readonly RunIndexEntry[]
   projects: readonly ProjectListEntry[]
   highlightedRunId?: string
-  onHighlightRun?: (runId: string) => void
+  onHighlightRun?: (runId: string | undefined) => void
 }) {
   const byId = React.useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const { nodes, edges } = React.useMemo(() => taskTreeToFlow(runs), [runs])

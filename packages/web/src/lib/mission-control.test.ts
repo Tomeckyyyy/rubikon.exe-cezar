@@ -6,6 +6,7 @@ import {
   isActiveRun,
   lastToolCallTitle,
   needsYouRun,
+  sortByAge,
   splitActiveRuns,
   splitByAttention,
   subtaskCounts,
@@ -67,6 +68,27 @@ describe('needsYouRun / splitByAttention', () => {
     const { needsYou, working } = splitByAttention(runs)
     expect(needsYou.map((r) => r.id)).toEqual(['r2', 'r4'])
     expect(working.map((r) => r.id)).toEqual(['r1', 'r3'])
+  })
+})
+
+describe('sortByAge', () => {
+  it('orders oldest (by startedAt, falling back to createdAt) first', () => {
+    const runs = [
+      run({ id: 'newest', createdAt: '2026-09-19T00:03:00.000Z' }),
+      run({ id: 'oldest', createdAt: '2026-09-19T00:01:00.000Z' }),
+      run({ id: 'started-earlier-but-created-later', createdAt: '2026-09-19T00:05:00.000Z', startedAt: '2026-09-19T00:00:30.000Z' }),
+    ]
+    expect(sortByAge(runs).map((r) => r.id)).toEqual([
+      'started-earlier-but-created-later',
+      'oldest',
+      'newest',
+    ])
+  })
+
+  it('does not mutate the input array', () => {
+    const runs = [run({ id: 'a', createdAt: '2026-09-19T00:02:00.000Z' }), run({ id: 'b', createdAt: '2026-09-19T00:01:00.000Z' })]
+    sortByAge(runs)
+    expect(runs.map((r) => r.id)).toEqual(['a', 'b'])
   })
 })
 

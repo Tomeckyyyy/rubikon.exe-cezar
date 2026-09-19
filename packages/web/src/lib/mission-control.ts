@@ -54,6 +54,21 @@ export function splitByAttention<T extends Pick<RunIndexEntry, 'status'>>(
   return { needsYou, working }
 }
 
+/**
+ * Oldest-first — the order "Needs you" actually wants. `runs-index` lists newest-created first
+ * (so a person searching the palette sees their most recent work), which is exactly backwards for
+ * a pile of blocked runs: the one that has been asking the longest is the one to open first, not
+ * whichever was dispatched most recently. A separate function rather than baked into
+ * `splitByAttention`, matching this module's (and `lib/task-tree.ts`'s) "order is the caller's"
+ * rule — a caller that wants runs-index order untouched still can.
+ */
+export function sortByAge<T extends Pick<RunIndexEntry, 'startedAt' | 'createdAt'>>(
+  runs: readonly T[],
+): T[] {
+  const startedAt = (run: T) => new Date(run.startedAt ?? run.createdAt).getTime()
+  return [...runs].sort((a, b) => startedAt(a) - startedAt(b))
+}
+
 export type TileStatusPaint = { tone: StatusDotTone; pulse: boolean; label: string }
 
 /**

@@ -4,7 +4,7 @@ import * as React from 'react'
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
 import { CenteredState } from '@/components/centered-state'
-import { splitActiveRuns, splitByAttention, subtaskCounts } from '@/lib/mission-control'
+import { sortByAge, splitActiveRuns, splitByAttention, subtaskCounts } from '@/lib/mission-control'
 import { cn } from '@/lib/utils'
 
 import { AgentTile } from './agent-tile'
@@ -35,11 +35,15 @@ export function MissionControlGrid({
   /** The route's currently focused run (Phase 3) — a ring around the matching tile, preserved
    *  across a Grid⇄Graph switch because the route, not this component, owns the state. */
   highlightedRunId?: string
-  onHighlightRun?: (runId: string) => void
+  onHighlightRun?: (runId: string | undefined) => void
 }) {
   const byId = React.useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const { active, finished } = React.useMemo(() => splitActiveRuns(runs), [runs])
-  const { needsYou, working } = React.useMemo(() => splitByAttention(active), [active])
+  const { needsYou: needsYouRaw, working } = React.useMemo(() => splitByAttention(active), [active])
+  // Oldest-first: the run that has been asking the longest is the one to open first (see
+  // `sortByAge`'s own header) — the ONE place in this component that reorders rather than just
+  // partitions, because it is the one place a raw "newest first" order actively misleads.
+  const needsYou = React.useMemo(() => sortByAge(needsYouRaw), [needsYouRaw])
   const counts = React.useMemo(() => subtaskCounts(runs), [runs])
   const [showFinished, setShowFinished] = React.useState(false)
 
@@ -144,7 +148,7 @@ function Tiles({
   counts: ReadonlyMap<string, number>
   observeVisibility?: boolean
   highlightedRunId?: string
-  onHighlightRun?: (runId: string) => void
+  onHighlightRun?: (runId: string | undefined) => void
   className?: string
 }) {
   return (
@@ -194,7 +198,7 @@ function ObservedAgentTile({
   project?: ProjectListEntry
   subtaskCount?: number
   highlighted?: boolean
-  onHighlight?: (runId: string) => void
+  onHighlight?: (runId: string | undefined) => void
 }) {
   const { setNode, toolCall } = useVisibleRunEvents(run)
   return (
