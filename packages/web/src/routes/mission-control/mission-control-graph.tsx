@@ -1,10 +1,12 @@
 import '@xyflow/react/dist/style.css'
 
 import { Background, Controls, Handle, Position, ReactFlow, type Node, type NodeProps, type NodeTypes } from '@xyflow/react'
+import { NetworkIcon } from 'lucide-react'
 import * as React from 'react'
 
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
+import { CenteredState } from '@/components/centered-state'
 import { useTheme } from '@/components/theme-provider'
 
 import { AgentTile } from './agent-tile'
@@ -64,6 +66,22 @@ export function MissionControlGraph({
 
   const nodeTypes = React.useMemo<NodeTypes>(() => ({ agentTile: AgentTileNode }), [])
 
+  if (nodes.length === 0) {
+    // Every run right now is either standalone or filtered out of `taskTreeToFlow` for having no
+    // dispatch relationship at all (see that function's own header for why an isolated run is no
+    // longer drawn as a node here) — a graph of zero dispatch trees is a correct, common state,
+    // not an error, and saying so directly beats an empty canvas that just looks unfinished.
+    return (
+      <CenteredState
+        heading="h2"
+        icon={<NetworkIcon />}
+        tone="neutral"
+        title="No dispatch trees right now"
+        subtitle="Swarm Graph only draws work that fanned out — a task that dispatched its own subtasks. Plain tasks show in Grid instead."
+      />
+    )
+  }
+
   return (
     <div data-slot="mission-control-graph" className="h-[calc(100dvh-8rem)] min-h-[420px] w-full rounded-lg border border-border">
       <ReactFlow
@@ -108,13 +126,14 @@ export function MissionControlGraph({
  * `nodesConnectable={false}` on `<ReactFlow>` — so there is nothing to click) while still giving
  * every edge somewhere to anchor to. */
 function AgentTileNode({ data }: NodeProps) {
-  const { run, project, highlighted, onHighlight } = data as DecoratedNodeData
+  const { run, project, subtaskCount, highlighted, onHighlight } = data as DecoratedNodeData
   return (
     <>
       <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
       <AgentTile
         run={run}
         project={project}
+        subtaskCount={subtaskCount}
         compact
         className="w-[236px]"
         highlighted={highlighted}

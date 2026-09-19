@@ -18,6 +18,10 @@ import { buildTaskTree, flattenTaskTree, type TaskTreeNode } from '@/lib/task-tr
  *  `run` straight off this to render an `AgentTile`. */
 export interface MissionControlFlowNodeData extends Record<string, unknown> {
   run: RunIndexEntry
+  /** Direct dispatched children — same number the Grid's tile badge shows (`lib/mission-control`'s
+   *  `subtaskCounts`). Was missing entirely before this pass: the one view built to show dispatch
+   *  hierarchy wasn't even printing "N subtasks" on its own nodes. */
+  subtaskCount?: number
 }
 
 export interface MissionControlFlowNode {
@@ -58,14 +62,24 @@ function isInFlight(run: Pick<RunIndexEntry, 'status'>): boolean {
 }
 
 /**
- * One tree → one connected dagre layout, positioned so multiple trees (and standalone,
- * non-dispatched runs — spec UI/UX: "separate isolated nodes/islands on the same canvas") never
- * overlap: each is laid out independently and offset along X by the previous trees' width.
+ * One tree → one connected dagre layout, positioned so multiple trees never overlap: each is
+ * laid out independently and offset along X by the previous trees' width.
+ *
+ * A run with no dispatch relationship at all is DROPPED here, not drawn as its own isolated node
+ * (a reversal of this module's original behavior — see git history / spec 2026-09-18-mission-
+ * control for the earlier "islands" design). A single node with no edges tells a viewer nothing a
+ * Grid tile doesn't already say better (cost, CPU, live thumbnail); at real usage scale, most
+ * runs never dispatch, so drawing every one of them as a same-sized floating card just reproduces
+ * the Grid with worse information density — the exact complaint that prompted this rewrite. The
+ * Swarm Graph's only reason to exist is the SHAPE of dispatched work, so it now shows exactly
+ * that and nothing else: when nothing has dispatched anything, `nodes` comes back empty and the
+ * caller (`mission-control-graph.tsx`) renders a dedicated empty state instead of a canvas full of
+ * disconnected cards.
  */
 export function taskTreeToFlow(
   runs: readonly RunIndexEntry[],
 ): { nodes: MissionControlFlowNode[]; edges: MissionControlFlowEdge[] } {
-  const trees = buildTaskTree(runs)
+  const trees = buildTaskTree(runs).filter((tree) => tree.descendantCount > 0)
   const nodes: MissionControlFlowNode[] = []
   const edges: MissionControlFlowEdge[] = []
   let xOffset = 0
@@ -101,14 +115,21 @@ function layoutOneTree(
     for (const child of node.children) {
       graph.setEdge(node.run.id, child.run.id)
       const animated = isInFlight(child.run)
+      // Fan-out below THIS branch, not just whether it's in flight — a child that itself
+      // dispatched nothing draws the thinnest line; one that fanned out to a handful of its own
+      // subagents draws a visibly heavier one, so a glance at the tree shows where the actual
+      // swarm is, not just a uniform set of same-weight lines. Capped so one enormous branch
+      // cannot swallow the rest of the drawing.
+      const weight = Math.min(child.descendantCount, 6)
+      const strokeWidth = (animated ? 2 : 1.5) + weight * 0.4
       edges.push({
         id: `${node.run.id}->${child.run.id}`,
         source: node.run.id,
         target: child.run.id,
         animated,
         style: animated
-          ? { stroke: 'var(--violet)', strokeWidth: 2 }
-          : { stroke: 'var(--soft-foreground)', strokeWidth: 1.5 },
+          ? { stroke: 'var(--violet)', strokeWidth }
+          : { stroke: 'var(--soft-foreground)', strokeWidth },
       })
     }
   }
@@ -122,7 +143,7 @@ function layoutOneTree(
       type: 'agentTile',
       // dagre centers nodes on `{x,y}`; react-flow positions from the top-left corner.
       position: { x: position.x - NODE_WIDTH / 2, y: position.y - NODE_HEIGHT / 2 },
-      data: { run: node.run },
+      data: { run: node.run, subtaskCount: node.childCount || undefined },
     }
   })
 

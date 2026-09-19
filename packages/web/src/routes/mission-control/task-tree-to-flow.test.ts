@@ -29,11 +29,48 @@ describe('taskTreeToFlow', () => {
     expect(edges.map((e) => `${e.source}->${e.target}`).sort()).toEqual(['root->child-1', 'root->child-2'])
   })
 
-  it('never drops a standalone (non-dispatched) run — it becomes its own isolated node', () => {
-    const runs = [run({ id: 'root' }), run({ id: 'standalone' })]
+  it('drops a standalone (non-dispatched) run entirely — a lone node with no edge repeats the Grid, not the dispatch shape this view exists to show', () => {
+    const runs = [
+      run({ id: 'dispatcher' }),
+      run({ id: 'dispatcher-child', dispatch: { rootRunId: 'dispatcher', parentRunId: 'dispatcher', kind: 'implement' } }),
+      run({ id: 'standalone' }),
+    ]
+    const { nodes } = taskTreeToFlow(runs)
+    expect(nodes.map((n) => n.id).sort()).toEqual(['dispatcher', 'dispatcher-child'])
+  })
+
+  it('comes back empty when nothing in the list has dispatched anything', () => {
+    const runs = [run({ id: 'a' }), run({ id: 'b' }), run({ id: 'c' })]
     const { nodes, edges } = taskTreeToFlow(runs)
-    expect(nodes.map((n) => n.id).sort()).toEqual(['root', 'standalone'])
+    expect(nodes).toHaveLength(0)
     expect(edges).toHaveLength(0)
+  })
+
+  it('draws a heavier edge under a branch that fanned out to more of its own subtasks', () => {
+    const runs = [
+      run({ id: 'root' }),
+      run({ id: 'light-child', dispatch: { rootRunId: 'root', parentRunId: 'root', kind: 'implement' } }),
+      run({ id: 'heavy-child', dispatch: { rootRunId: 'root', parentRunId: 'root', kind: 'implement' } }),
+      run({ id: 'grandchild-1', dispatch: { rootRunId: 'root', parentRunId: 'heavy-child', kind: 'implement' } }),
+      run({ id: 'grandchild-2', dispatch: { rootRunId: 'root', parentRunId: 'heavy-child', kind: 'implement' } }),
+    ]
+    const { edges } = taskTreeToFlow(runs)
+    const byTarget = new Map(edges.map((e) => [e.target, e]))
+    expect(byTarget.get('heavy-child')!.style.strokeWidth).toBeGreaterThan(
+      byTarget.get('light-child')!.style.strokeWidth,
+    )
+  })
+
+  it("carries each node's own direct-child count for the tile's subtask badge", () => {
+    const runs = [
+      run({ id: 'root' }),
+      run({ id: 'child-1', dispatch: { rootRunId: 'root', parentRunId: 'root', kind: 'implement' } }),
+      run({ id: 'child-2', dispatch: { rootRunId: 'root', parentRunId: 'root', kind: 'review' } }),
+    ]
+    const { nodes } = taskTreeToFlow(runs)
+    const byId = new Map(nodes.map((n) => [n.id, n]))
+    expect(byId.get('root')!.data.subtaskCount).toBe(2)
+    expect(byId.get('child-1')!.data.subtaskCount).toBeUndefined()
   })
 
   it('never overlaps two separate trees on the canvas', () => {
@@ -41,6 +78,7 @@ describe('taskTreeToFlow', () => {
       run({ id: 'tree-a-root' }),
       run({ id: 'tree-a-child', dispatch: { rootRunId: 'tree-a-root', parentRunId: 'tree-a-root', kind: 'implement' } }),
       run({ id: 'tree-b-root' }),
+      run({ id: 'tree-b-child', dispatch: { rootRunId: 'tree-b-root', parentRunId: 'tree-b-root', kind: 'implement' } }),
     ]
     const { nodes } = taskTreeToFlow(runs)
     const byId = new Map(nodes.map((n) => [n.id, n]))
@@ -66,9 +104,13 @@ describe('taskTreeToFlow', () => {
   })
 
   it('carries the whole run on each node for the custom node renderer', () => {
-    const runs = [run({ id: 'root', title: 'Root task' })]
+    const runs = [
+      run({ id: 'root', title: 'Root task' }),
+      run({ id: 'child', dispatch: { rootRunId: 'root', parentRunId: 'root', kind: 'implement' } }),
+    ]
     const { nodes } = taskTreeToFlow(runs)
-    expect(nodes[0]!.data.run.id).toBe('root')
-    expect(nodes[0]!.type).toBe('agentTile')
+    const root = nodes.find((n) => n.id === 'root')!
+    expect(root.data.run.id).toBe('root')
+    expect(root.type).toBe('agentTile')
   })
 })

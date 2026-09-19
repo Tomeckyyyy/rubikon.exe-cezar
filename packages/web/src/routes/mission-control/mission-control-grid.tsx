@@ -1,4 +1,4 @@
-import { RadarIcon } from 'lucide-react'
+import { ChevronDownIcon, RadarIcon } from 'lucide-react'
 import * as React from 'react'
 
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
@@ -50,26 +50,28 @@ export function MissionControlGrid({
 
   return (
     <div data-slot="mission-control-grid" className="flex flex-col gap-4">
-      <section data-slot="mission-control-active" aria-label="Active runs">
-        {finished.length > 0 ? (
-          // Only shown once there's a second section to distinguish it from — with nothing
-          // finished yet, "Active" would be the only heading on the page and just adds noise.
-          <p className="mb-2 text-[12px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
-            Active
-          </p>
-        ) : null}
-        {/* Only ACTIVE tiles ever observe their own visibility (Phase 2): a finished run is
-            never `running`, so `useVisibleRunEvents` on one would just be an idle
-            IntersectionObserver paying rent for nothing. */}
-        <Tiles
-          runs={active}
-          byId={byId}
-          counts={counts}
-          observeVisibility
-          highlightedRunId={highlightedRunId}
-          onHighlightRun={onHighlightRun}
-        />
-      </section>
+      {active.length > 0 ? (
+        <section data-slot="mission-control-active" aria-label="Active runs">
+          {finished.length > 0 ? (
+            // Only shown once there's a second section to distinguish it from — with nothing
+            // finished yet, "Active" would be the only heading on the page and just adds noise.
+            <p className="mb-2 text-[12px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
+              Active
+            </p>
+          ) : null}
+          {/* Only ACTIVE tiles ever observe their own visibility (Phase 2): a finished run is
+              never `running`, so `useVisibleRunEvents` on one would just be an idle
+              IntersectionObserver paying rent for nothing. */}
+          <Tiles
+            runs={active}
+            byId={byId}
+            counts={counts}
+            observeVisibility
+            highlightedRunId={highlightedRunId}
+            onHighlightRun={onHighlightRun}
+          />
+        </section>
+      ) : null}
 
       {finished.length > 0 ? (
         <section data-slot="mission-control-finished">
@@ -78,8 +80,15 @@ export function MissionControlGrid({
             data-action="toggle-finished"
             aria-expanded={showFinished}
             onClick={() => setShowFinished((current) => !current)}
-            className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold tracking-[0.04em] text-soft-foreground uppercase"
+            // Same disclosure convention as `agents-dock.tsx`'s header (chevron, rotate on
+            // collapse) — this one was text-only, which is why it read as a label rather than a
+            // control: nothing about it looked pressable.
+            className="group -mx-1.5 mb-2 flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[12px] font-semibold tracking-[0.04em] text-soft-foreground uppercase hover:bg-muted hover:text-foreground"
           >
+            <ChevronDownIcon
+              aria-hidden
+              className={cn('size-3.5 shrink-0 transition-transform', !showFinished && '-rotate-90')}
+            />
             Recently finished
             <span className="font-mono text-[11px] font-medium tabular-nums">{finished.length}</span>
           </button>

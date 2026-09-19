@@ -74,14 +74,14 @@ function renderGraph(runs: RunIndexEntry[]) {
 }
 
 describe('MissionControlGraph', () => {
-  it('renders one DOM node per run', () => {
+  it('renders one DOM node per DISPATCHED run, dropping standalone runs entirely', () => {
     const runs = [
       run({ id: 'root' }),
       run({ id: 'child-1', dispatch: { rootRunId: 'root', parentRunId: 'root', kind: 'implement' } }),
       run({ id: 'standalone' }),
     ]
     const { container } = renderGraph(runs)
-    expect(container.querySelectorAll('.react-flow__node')).toHaveLength(3)
+    expect(container.querySelectorAll('.react-flow__node')).toHaveLength(2)
   })
 
   it('gives every node a target AND a source handle — required for react-flow to draw an edge to/from a custom node type at all', () => {
@@ -98,8 +98,9 @@ describe('MissionControlGraph', () => {
     }
   })
 
-  it('does not throw when nothing is dispatched (no edges to draw)', () => {
-    const { container } = renderGraph([run({ id: 'solo' })])
-    expect(container.querySelectorAll('.react-flow__node')).toHaveLength(1)
+  it('shows the "no dispatch trees" empty state instead of an empty canvas when nothing dispatched anything', () => {
+    const { container, getByText } = renderGraph([run({ id: 'solo' })])
+    expect(container.querySelectorAll('.react-flow__node')).toHaveLength(0)
+    expect(getByText('No dispatch trees right now')).not.toBeNull()
   })
 })
