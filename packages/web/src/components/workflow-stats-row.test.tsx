@@ -21,13 +21,17 @@ function group(overrides: Partial<WorkflowStatsGroup> = {}): WorkflowStatsGroup 
   }
 }
 
+function stat(slot: string) {
+  return screen.getByTestId('workflow-stats-row').querySelector(`[data-slot="${slot}"]`)
+}
+
 describe('WorkflowStatsRow', () => {
   it('renders nothing when there are no groups', () => {
     const { container } = render(<WorkflowStatsRow groups={[]} usage={{ tokens: true, cost: true }} />)
     expect(container.firstChild).toBeNull()
   })
 
-  it('shows the runner/model label and the outcome counts', () => {
+  it('shows the runner/model label, the run count, and each status separately', () => {
     render(
       <WorkflowStatsRow
         groups={[
@@ -39,12 +43,13 @@ describe('WorkflowStatsRow', () => {
         usage={{ tokens: true, cost: true }}
       />,
     )
-    const row = screen.getByTestId('workflow-stats-row').querySelector('[data-slot="workflow-stats-group"]')!
-    expect(row.textContent).toContain('claude/sonnet')
-    expect(row.textContent).toContain('12')
-    expect(row.textContent).toContain('9') // done + review
-    expect(row.textContent).toContain('2')
-    expect(row.textContent).toContain('1')
+    expect(stat('stat-runs')?.textContent).toContain('12')
+    expect(stat('stat-done')?.textContent).toContain('5')
+    expect(stat('stat-review')?.textContent).toContain('4')
+    expect(stat('stat-failed')?.textContent).toContain('2')
+    expect(stat('stat-cancelled')?.textContent).toContain('1')
+    const groupEl = screen.getByTestId('workflow-stats-row').querySelector('[data-slot="workflow-stats-group"]')!
+    expect(groupEl.textContent).toContain('claude/sonnet')
   })
 
   it('does not mark the failed count as danger below the sample-size threshold', () => {
@@ -54,8 +59,7 @@ describe('WorkflowStatsRow', () => {
         usage={{ tokens: true, cost: true }}
       />,
     )
-    const failedStat = screen.getByTestId('workflow-stats-row').querySelector('[data-slot="stat-failed"]')!
-    expect(failedStat.getAttribute('data-danger')).toBe('false')
+    expect(stat('stat-failed')?.getAttribute('data-danger')).toBe('false')
   })
 
   it('marks the failed count as danger at or above the sample-size threshold when any run failed', () => {
@@ -65,8 +69,7 @@ describe('WorkflowStatsRow', () => {
         usage={{ tokens: true, cost: true }}
       />,
     )
-    const failedStat = screen.getByTestId('workflow-stats-row').querySelector('[data-slot="stat-failed"]')!
-    expect(failedStat.getAttribute('data-danger')).toBe('true')
+    expect(stat('stat-failed')?.getAttribute('data-danger')).toBe('true')
   })
 
   it('hides cost and token stats when the usage capability says so', () => {
@@ -76,9 +79,8 @@ describe('WorkflowStatsRow', () => {
         usage={{ tokens: false, cost: false }}
       />,
     )
-    const el = screen.getByTestId('workflow-stats-row')
-    expect(el.querySelector('[data-slot="stat-cost"]')).toBeNull()
-    expect(el.querySelector('[data-slot="stat-tokens"]')).toBeNull()
+    expect(stat('stat-cost')).toBeNull()
+    expect(stat('stat-tokens')).toBeNull()
   })
 
   it('shows cost and token stats when visible and present', () => {
@@ -88,13 +90,22 @@ describe('WorkflowStatsRow', () => {
         usage={{ tokens: true, cost: true }}
       />,
     )
-    const el = screen.getByTestId('workflow-stats-row')
-    expect(el.querySelector('[data-slot="stat-cost"]')?.textContent).toContain('$0.38')
-    expect(el.querySelector('[data-slot="stat-tokens"]')?.textContent).toContain('4.2k')
+    expect(stat('stat-cost')?.textContent).toContain('$0.38')
+    expect(stat('stat-tokens')?.textContent).toContain('4.2k')
   })
 
   it('omits the duration stat when no terminal run has both timestamps', () => {
     render(<WorkflowStatsRow groups={[group({ terminalTotal: 3, avgDurationMs: undefined })]} usage={{ tokens: true, cost: true }} />)
-    expect(screen.getByTestId('workflow-stats-row').querySelector('[data-slot="stat-duration"]')).toBeNull()
+    expect(stat('stat-duration')).toBeNull()
+  })
+
+  it('renders one quiet section heading, not per group', () => {
+    render(
+      <WorkflowStatsRow
+        groups={[group({ runner: 'claude', model: 'sonnet' }), group({ runner: 'codex', model: 'gpt-5' })]}
+        usage={{ tokens: true, cost: true }}
+      />,
+    )
+    expect(screen.getAllByText('Run history')).toHaveLength(1)
   })
 })
