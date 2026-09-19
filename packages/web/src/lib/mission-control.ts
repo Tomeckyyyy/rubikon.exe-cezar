@@ -105,6 +105,19 @@ export interface FleetTotals {
   costByProject: Map<string, number>
 }
 
+/** Which of the fleet-status bar's five buckets a run falls into — the SAME rule `fleetTotals`
+ *  counts by, pulled out on its own so the bar's segments can also FILTER by it (a click needs to
+ *  ask "which runs are in this bucket", not just "how many"). */
+export type FleetStatusBucket = keyof FleetStatusCounts
+
+export function statusBucketOf(run: Pick<RunIndexEntry, 'status'>): FleetStatusBucket {
+  if (needsYouRun(run)) return 'needsYou'
+  if (isActiveRun(run)) return 'working'
+  if (run.status === 'failed') return 'failed'
+  if (run.status === 'cancelled') return 'cancelled'
+  return 'done'
+}
+
 /**
  * Every run in the index, reduced to what the fleet-level readout at the top of Mission Control
  * needs (spec follow-up: "management," not just triage) — one pass, pure, so it is testable
@@ -116,17 +129,52 @@ export function fleetTotals(runs: readonly RunIndexEntry[]): FleetTotals {
   const costByProject = new Map<string, number>()
 
   for (const run of runs) {
-    const active = isActiveRun(run)
-    if (active) activeCostUsd += run.costUsd ?? 0
-    if (needsYouRun(run)) statusCounts.needsYou += 1
-    else if (active) statusCounts.working += 1
-    else if (run.status === 'failed') statusCounts.failed += 1
-    else if (run.status === 'cancelled') statusCounts.cancelled += 1
-    else statusCounts.done += 1
+    if (isActiveRun(run)) activeCostUsd += run.costUsd ?? 0
+    statusCounts[statusBucketOf(run)] += 1
     if (run.costUsd) costByProject.set(run.projectId, (costByProject.get(run.projectId) ?? 0) + run.costUsd)
   }
 
   return { activeCostUsd, statusCounts, costByProject }
+}
+
+/** What the fleet panel's click narrows the Grid/Graph down to — never both a project AND a
+ *  status at once: this is "drill into one slice," not a general filter builder, and `undefined`
+ *  is the ordinary "show everything" state, not a missing feature. */
+export type MissionControlFilter =
+  | { kind: 'project'; projectId: string }
+  | { kind: 'status'; bucket: FleetStatusBucket }
+  | undefined
+
+/** A short, human label for the active filter chip (`mission-control-route.tsx`'s header) —
+ *  named here, not spelled out at each call site, so the chip's wording and the filter's actual
+ *  meaning can never drift apart. */
+export function missionControlFilterLabel(
+  filter: MissionControlFilter,
+  projectName: (projectId: string) => string,
+): string | undefined {
+  if (filter === undefined) return undefined
+  if (filter.kind === 'project') return projectName(filter.projectId)
+  const labels: Record<FleetStatusBucket, string> = {
+    needsYou: 'needs you',
+    working: 'working',
+    done: 'done',
+    failed: 'failed',
+    cancelled: 'cancelled',
+  }
+  return labels[filter.bucket]
+}
+
+/** `runs`, narrowed to the active filter — or the same runs, unchanged, when nothing is selected.
+ *  Applied to what the Grid/Graph render; the fleet panel itself always reads the UNFILTERED list
+ *  (`mission-control-route.tsx`), so selecting a slice narrows the content below it without also
+ *  shrinking the control you just clicked out from under your own next click. */
+export function applyMissionControlFilter(
+  runs: readonly RunIndexEntry[],
+  filter: MissionControlFilter,
+): RunIndexEntry[] {
+  if (filter === undefined) return [...runs]
+  if (filter.kind === 'project') return runs.filter((run) => run.projectId === filter.projectId)
+  return runs.filter((run) => statusBucketOf(run) === filter.bucket)
 }
 
 /**

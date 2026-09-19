@@ -1,10 +1,16 @@
-import { LayersIcon, LoaderCircleIcon } from 'lucide-react'
+import { LayersIcon, LoaderCircleIcon, XIcon } from 'lucide-react'
 import * as React from 'react'
 
 import { useHealth, useProjects, useRunsIndex } from '@/api/queries'
 import { CenteredState } from '@/components/centered-state'
 import { truncatedProjectNames } from '@/lib/global-tasks'
-import { fleetTotals, needsYouRun } from '@/lib/mission-control'
+import {
+  applyMissionControlFilter,
+  fleetTotals,
+  missionControlFilterLabel,
+  needsYouRun,
+  type MissionControlFilter,
+} from '@/lib/mission-control'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useMissionControlView, type MissionControlView } from '@/lib/use-mission-control-view'
 import { cn } from '@/lib/utils'
@@ -40,7 +46,20 @@ export function MissionControlRoute() {
   const index = useRunsIndex(true, RUNS_INDEX_POLL_MS)
   const { view, setView } = useMissionControlView()
   const [highlightedRunId, setHighlightedRunId] = React.useState<string | undefined>(undefined)
+  // What the fleet panel's click narrows Grid/Graph down to — lives here, not in the fleet panel
+  // itself, for the same reason `highlightedRunId` does: it must survive whichever view is
+  // currently mounted, and the panel that sets it must keep reading the FULL fleet regardless of
+  // what is currently selected (see `mission-control-fleet.tsx`'s own header).
+  const [filter, setFilter] = React.useState<MissionControlFilter>(undefined)
   const registry = React.useMemo(() => projects.data?.projects ?? [], [projects.data])
+  const projectName = React.useCallback(
+    (projectId: string) => registry.find((project) => project.id === projectId)?.name ?? projectId,
+    [registry],
+  )
+  const filteredRuns = React.useMemo(
+    () => applyMissionControlFilter(index.data?.runs ?? [], filter),
+    [index.data, filter],
+  )
   const truncated = React.useMemo(
     () => truncatedProjectNames(index.data?.truncated ?? [], registry),
     [index.data, registry],
@@ -74,6 +93,18 @@ export function MissionControlRoute() {
       <header className="sticky top-0 z-10 hidden h-14 shrink-0 items-center gap-3 border-b border-border bg-background px-5 md:flex">
         <h1 className="text-base font-semibold">Mission Control</h1>
         <ViewToggle view={view} onChange={setView} />
+        {filter ? (
+          <button
+            type="button"
+            data-slot="mission-control-filter-chip"
+            onClick={() => setFilter(undefined)}
+            title="Clear filter"
+            className="flex items-center gap-1.5 rounded-full bg-violet/15 py-0.5 pr-1.5 pl-2.5 text-[12px] font-medium text-violet"
+          >
+            {missionControlFilterLabel(filter, projectName)}
+            <XIcon className="size-3.5" aria-hidden="true" />
+          </button>
+        ) : null}
         {needsYouCount > 0 ? (
           // The one number a person opening this page actually wants first: not "how many
           // agents exist" but "how many of them are stuck on ME right now" — the run count to
@@ -92,8 +123,19 @@ export function MissionControlRoute() {
       </header>
 
       <div className="flex flex-1 flex-col gap-3 p-3 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-5 md:pb-5">
-        <div className="md:hidden">
+        <div className="flex items-center gap-2 md:hidden">
           <ViewToggle view={view} onChange={setView} />
+          {filter ? (
+            <button
+              type="button"
+              onClick={() => setFilter(undefined)}
+              title="Clear filter"
+              className="flex items-center gap-1.5 rounded-full bg-violet/15 py-0.5 pr-1.5 pl-2.5 text-[12px] font-medium text-violet"
+            >
+              {missionControlFilterLabel(filter, projectName)}
+              <XIcon className="size-3.5" aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
 
         {truncated.length > 0 ? (
@@ -104,18 +146,30 @@ export function MissionControlRoute() {
         ) : null}
 
         {index.data ? (
+          // Reads the FULL index, never `filteredRuns` — see this component's own header for why
+          // (selecting "needs you" must not make the "working" segment disappear underneath it).
           <MissionControlFleet
             runs={index.data.runs}
             projects={registry}
             costHistory={costHistory}
             showCost={metrics.cost}
+            filter={filter}
+            onFilterChange={setFilter}
           />
         ) : null}
 
-        {index.data === undefined ? null : view === 'graph' ? (
+        {index.data === undefined ? null : filter && filteredRuns.length === 0 ? (
+          <CenteredState
+            heading="h2"
+            icon={<LayersIcon />}
+            tone="neutral"
+            title="Nothing matches this filter"
+            subtitle={`No runs are currently ${missionControlFilterLabel(filter, projectName)}.`}
+          />
+        ) : view === 'graph' ? (
           <React.Suspense fallback={<GraphLoading />}>
             <MissionControlGraph
-              runs={index.data.runs}
+              runs={filteredRuns}
               projects={registry}
               highlightedRunId={highlightedRunId}
               onHighlightRun={setHighlightedRunId}
@@ -123,7 +177,7 @@ export function MissionControlRoute() {
           </React.Suspense>
         ) : (
           <MissionControlGrid
-            runs={index.data.runs}
+            runs={filteredRuns}
             projects={registry}
             highlightedRunId={highlightedRunId}
             onHighlightRun={setHighlightedRunId}

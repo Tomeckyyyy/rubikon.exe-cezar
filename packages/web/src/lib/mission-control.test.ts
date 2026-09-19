@@ -3,13 +3,16 @@ import { describe, expect, it } from 'vitest'
 import type { RunEvent, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
 import {
+  applyMissionControlFilter,
   fleetTotals,
   isActiveRun,
   lastToolCallTitle,
+  missionControlFilterLabel,
   needsYouRun,
   sortByAge,
   splitActiveRuns,
   splitByAttention,
+  statusBucketOf,
   subtaskCounts,
   tileStatusPaint,
 } from './mission-control'
@@ -131,6 +134,50 @@ describe('fleetTotals', () => {
     const { costByProject } = fleetTotals(runs)
     expect(costByProject.get('api')).toBe(3)
     expect(costByProject.get('web')).toBe(5)
+  })
+})
+
+describe('statusBucketOf', () => {
+  it.each([
+    ['waiting', 'needsYou'],
+    ['review', 'needsYou'],
+    ['running', 'working'],
+    ['queued', 'working'],
+    ['failed', 'failed'],
+    ['cancelled', 'cancelled'],
+    ['done', 'done'],
+  ] as const)('buckets %s as %s', (status, bucket) => {
+    expect(statusBucketOf({ status })).toBe(bucket)
+  })
+})
+
+describe('applyMissionControlFilter / missionControlFilterLabel', () => {
+  const runs = [
+    run({ id: 'a', projectId: 'api', status: 'waiting' }),
+    run({ id: 'b', projectId: 'api', status: 'running' }),
+    run({ id: 'c', projectId: 'web', status: 'done' }),
+  ]
+
+  it('passes every run through unchanged when there is no filter', () => {
+    expect(applyMissionControlFilter(runs, undefined).map((r) => r.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('narrows to one project', () => {
+    expect(applyMissionControlFilter(runs, { kind: 'project', projectId: 'api' }).map((r) => r.id)).toEqual([
+      'a',
+      'b',
+    ])
+  })
+
+  it('narrows to one status bucket', () => {
+    expect(applyMissionControlFilter(runs, { kind: 'status', bucket: 'working' }).map((r) => r.id)).toEqual(['b'])
+  })
+
+  it('labels a project filter by its resolved name, a status filter by its bucket name', () => {
+    const projectName = (id: string) => (id === 'api' ? 'API' : id)
+    expect(missionControlFilterLabel({ kind: 'project', projectId: 'api' }, projectName)).toBe('API')
+    expect(missionControlFilterLabel({ kind: 'status', bucket: 'needsYou' }, projectName)).toBe('needs you')
+    expect(missionControlFilterLabel(undefined, projectName)).toBeUndefined()
   })
 })
 

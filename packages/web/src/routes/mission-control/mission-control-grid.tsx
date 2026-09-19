@@ -45,7 +45,15 @@ export function MissionControlGrid({
   // partitions, because it is the one place a raw "newest first" order actively misleads.
   const needsYou = React.useMemo(() => sortByAge(needsYouRaw), [needsYouRaw])
   const counts = React.useMemo(() => subtaskCounts(runs), [runs])
-  const [showFinished, setShowFinished] = React.useState(false)
+  const [showFinishedToggle, setShowFinished] = React.useState(false)
+  // Auto-open when finished work is the ONLY thing left to show — most commonly, the fleet
+  // panel's own "done"/"failed"/"cancelled" segments (`mission-control-route.tsx`'s `filter`)
+  // narrowing the Grid down to exactly that bucket. Without this, clicking "12 done" would look
+  // like it filtered to nothing: the matching tiles would sit correctly counted but collapsed
+  // behind a toggle nobody was told to open. The manual toggle still works whenever there is
+  // OTHER content on the page to collapse away from.
+  const showFinished = showFinishedToggle || active.length === 0
+
 
   if (runs.length === 0) {
     return (

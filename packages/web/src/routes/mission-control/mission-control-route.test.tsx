@@ -52,6 +52,16 @@ const RUNS: RunIndexEntry[] = [
     workflow: 'quick-task',
     dispatch: { rootRunId: 'root', parentRunId: 'root', kind: 'review' },
   },
+  {
+    projectId: 'api',
+    id: 'finished',
+    title: 'Finished task',
+    status: 'done',
+    createdAt: '2026-09-19T00:02:00.000Z',
+    archived: false,
+    workflow: 'quick-task',
+    costUsd: 1.23,
+  },
 ]
 
 let uiState: WorkspaceUiState = {}
@@ -152,5 +162,38 @@ describe('MissionControlRoute', () => {
     clickView('Swarm Graph')
     await act(async () => {})
     await waitFor(() => expect(uiState.missionControlView).toBe('graph'))
+  })
+
+  it('clicking a fleet status segment narrows the Grid to that bucket, and clicking it again clears the filter', async () => {
+    const { container } = renderRoute()
+    await waitFor(() => expect(screen.queryByText('Root task')).not.toBeNull())
+    // Recently finished is collapsed by default while other work is visible.
+    expect(screen.queryByText('Finished task')).toBeNull()
+
+    fireEvent.click(screen.getByTitle('2 working — click to filter'))
+    await waitFor(() =>
+      expect(container.querySelector('[data-slot="mission-control-filter-chip"]')).not.toBeNull(),
+    )
+    expect(screen.queryByText('Root task')).not.toBeNull()
+    expect(screen.queryByText('Dispatched review')).not.toBeNull()
+    // The finished run is filtered OUT, not just collapsed — it should not be findable even by
+    // expanding "Recently finished", because the filter removed it before Grid ever saw it.
+    expect(screen.queryByText('Finished task')).toBeNull()
+    expect(container.querySelector('[data-slot="mission-control-filter-chip"]')?.textContent).toContain('working')
+
+    fireEvent.click(screen.getByTitle('2 working — click to filter'))
+    await waitFor(() =>
+      expect(container.querySelector('[data-slot="mission-control-filter-chip"]')).toBeNull(),
+    )
+  })
+
+  it('filtering to a status bucket that only finished runs belong to auto-expands "Recently finished"', async () => {
+    renderRoute()
+    await waitFor(() => expect(screen.queryByText('Root task')).not.toBeNull())
+
+    fireEvent.click(screen.getByTitle('1 done — click to filter'))
+    await waitFor(() => expect(screen.queryByText('Finished task')).not.toBeNull())
+    // Narrowed away entirely — the two running tasks are not "done".
+    expect(screen.queryByText('Root task')).toBeNull()
   })
 })
