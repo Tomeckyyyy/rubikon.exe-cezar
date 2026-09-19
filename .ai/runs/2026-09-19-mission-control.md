@@ -83,11 +83,11 @@ mode; no other backend/contract changes.
 
 ### Phase 1: Grid/Radar
 
-- [ ] 1.1 Route + minimal MissionControlRoute
-- [ ] 1.2 AgentTile + mission-control-grid.tsx
-- [ ] 1.3 Nav entry (app-shell + command-palette)
-- [ ] 1.4 Empty states + truncated hint
-- [ ] 1.5 Grid tests
+- [x] 1.1 Route + minimal MissionControlRoute — 8008c92a
+- [x] 1.2 AgentTile + mission-control-grid.tsx — 8008c92a
+- [x] 1.3 Nav entry (app-shell + command-palette) — 8008c92a
+- [x] 1.4 Empty states + truncated hint — 8008c92a
+- [x] 1.5 Grid tests — 8008c92a
 
 ### Phase 2: Live tool-call thumbnail
 
