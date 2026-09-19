@@ -78,6 +78,8 @@ mode; no other backend/contract changes.
 
 ## Progress
 
+PR: #2
+
 > Convention: `- [ ]` pending, `- [x]` done. Append ` — <commit sha>` when a step lands. Do not
 > rename step titles.
 
@@ -97,8 +99,8 @@ mode; no other backend/contract changes.
 
 ### Phase 3: Swarm Graph
 
-- [ ] 3.1 Add @xyflow/react + dagre, lazy-load Graph module
-- [ ] 3.2 task-tree-to-flow.ts + unit tests
-- [ ] 3.3 mission-control-graph.tsx
-- [ ] 3.4 Grid⇄Graph toggle + mode persistence
-- [ ] 3.5 Toggle-survives-highlight test
+- [x] 3.1 Add @xyflow/react + dagre, lazy-load Graph module — 86dc386b
+- [x] 3.2 task-tree-to-flow.ts + unit tests — 86dc386b
+- [x] 3.3 mission-control-graph.tsx — 86dc386b
+- [x] 3.4 Grid⇄Graph toggle + mode persistence — 86dc386b
+- [x] 3.5 Toggle-survives-highlight test — 86dc386b
