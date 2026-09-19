@@ -1,6 +1,6 @@
 import '@xyflow/react/dist/style.css'
 
-import { Background, Handle, Position, ReactFlow, type Node, type NodeProps, type NodeTypes } from '@xyflow/react'
+import { Background, Controls, Handle, Position, ReactFlow, type Node, type NodeProps, type NodeTypes } from '@xyflow/react'
 import * as React from 'react'
 
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
@@ -79,12 +79,20 @@ export function MissionControlGraph({
         // invisible. Wiring it to the app's own resolved theme is what keeps the two in sync.
         colorMode={resolvedTheme}
         fitView
+        fitViewOptions={{ padding: 0.25, maxZoom: 1 }}
+        minZoom={0.25}
         proOptions={{ hideAttribution: true }}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable
       >
         <Background gap={16} />
+        {/* No MiniMap (spec, Architecture — unneeded at this scale); Controls alone is what makes
+         *  pan/zoom discoverable instead of a mystery two-finger gesture on a canvas with no other
+         *  affordance. `showInteractive={false}` drops the lock toggle — this graph is read-only
+         *  already (`nodesDraggable`/`nodesConnectable` both false above), so the button would
+         *  control a capability that does not exist. */}
+        <Controls showInteractive={false} />
       </ReactFlow>
     </div>
   )
@@ -108,7 +116,7 @@ function AgentTileNode({ data }: NodeProps) {
         run={run}
         project={project}
         compact
-        className="w-[220px]"
+        className="w-[236px]"
         highlighted={highlighted}
         onHighlight={onHighlight}
       />

@@ -71,26 +71,45 @@ export const AgentTile = React.forwardRef<HTMLAnchorElement, AgentTileProps>(fun
       onMouseEnter={highlight}
       onFocus={highlight}
       className={cn(
-        'flex flex-col gap-1.5 rounded-lg border bg-card p-3 shadow-xs transition-colors hover:bg-muted',
-        paint.tone === 'success' && 'border-success/40',
-        paint.tone === 'pending' && 'border-pending/40',
-        paint.tone === 'danger' && 'border-danger/40',
-        paint.tone === 'neutral' && 'border-border',
-        paint.pulse && (paint.slow ? 'motion-safe:animate-[pulse_3s_ease-in-out_infinite]' : 'motion-safe:animate-pulse'),
-        compact && 'p-2 gap-1',
+        // A dozens-of-tiles-at-once board reads status by SCANNING, not reading — the reason this
+        // tile carries a stronger status signal (a full-height edge, not just the dot the design
+        // system otherwise reserves for that) than a Tasks row does. The bar sits in its own
+        // absolutely-positioned span below so `overflow-hidden` can clip it to the tile's own
+        // radius without a nested rounded corner of its own.
+        'group relative isolate flex flex-col gap-1.5 overflow-hidden rounded-lg border border-border bg-card p-3 pl-3.5 shadow-xs transition-colors hover:bg-muted',
+        compact && 'p-2 pl-2.5 gap-1',
         highlighted && 'ring-2 ring-violet ring-offset-1 ring-offset-background',
         className,
       )}
     >
-      <span className="flex min-w-0 items-center gap-1.5">
-        <StatusDot tone={paint.tone} pulse={paint.pulse} />
-        <span className={cn('min-w-0 flex-1 truncate font-medium', compact ? 'text-[11.5px]' : 'text-[13px]')}>
+      <span
+        aria-hidden="true"
+        data-slot="agent-tile-status-bar"
+        className={cn(
+          'absolute inset-y-0 left-0 w-[3px]',
+          paint.tone === 'success' && 'bg-success',
+          paint.tone === 'pending' && 'bg-pending',
+          paint.tone === 'danger' && 'bg-danger',
+          paint.tone === 'neutral' && 'bg-border',
+          paint.pulse && (paint.slow ? 'motion-safe:animate-[pulse_3s_ease-in-out_infinite]' : 'motion-safe:animate-pulse'),
+        )}
+      />
+
+      <span className="flex min-w-0 items-start gap-1.5">
+        <StatusDot tone={paint.tone} pulse={paint.pulse} className="mt-[5px]" />
+        <span
+          className={cn(
+            'min-w-0 flex-1 font-medium break-words',
+            compact ? 'line-clamp-1 text-[11.5px]' : 'line-clamp-2 text-[13px] leading-[1.35]',
+          )}
+        >
           {title}
         </span>
         {subtaskCount ? (
           <span
             data-slot="agent-tile-subtasks"
-            className="shrink-0 rounded-full bg-muted px-1.5 py-px text-[10.5px] font-medium text-muted-foreground"
+            title={`${subtaskCount} subtask${subtaskCount === 1 ? '' : 's'}`}
+            className="mt-px shrink-0 rounded-full bg-muted px-1.5 py-px text-[10.5px] font-medium text-muted-foreground"
           >
             {subtaskCount}
           </span>

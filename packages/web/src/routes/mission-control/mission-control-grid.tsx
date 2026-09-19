@@ -51,6 +51,13 @@ export function MissionControlGrid({
   return (
     <div data-slot="mission-control-grid" className="flex flex-col gap-4">
       <section data-slot="mission-control-active" aria-label="Active runs">
+        {finished.length > 0 ? (
+          // Only shown once there's a second section to distinguish it from — with nothing
+          // finished yet, "Active" would be the only heading on the page and just adds noise.
+          <p className="mb-2 text-[12px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
+            Active
+          </p>
+        ) : null}
         {/* Only ACTIVE tiles ever observe their own visibility (Phase 2): a finished run is
             never `running`, so `useVisibleRunEvents` on one would just be an idle
             IntersectionObserver paying rent for nothing. */}
@@ -111,7 +118,7 @@ function Tiles({
   return (
     <div
       data-slot="mission-control-tiles"
-      className={cn('grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3', className)}
+      className={cn('grid grid-cols-[repeat(auto-fill,minmax(248px,1fr))] gap-3', className)}
     >
       {runs.map((run) =>
         observeVisibility ? (

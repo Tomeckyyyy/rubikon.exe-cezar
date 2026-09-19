@@ -45,8 +45,8 @@ export interface MissionControlFlowEdge {
 /** The tile footprint dagre lays out against — must match the actual rendered size closely
  *  enough that dagre's spacing looks intentional; exactness does not matter, since react-flow's
  *  own pan/zoom absorbs any small drift. */
-const NODE_WIDTH = 220
-const NODE_HEIGHT = 84
+const NODE_WIDTH = 236
+const NODE_HEIGHT = 88
 const RANK_SEP = 80
 const NODE_SEP = 40
 
