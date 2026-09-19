@@ -95,6 +95,7 @@ function serve({
       monitoringWakeIntervalMinutes: null,
       autoResumeOnUsageLimit: true,
       memoryLimitMb: null,
+      dispatchMaxConcurrent: null,
       worktreeRetentionDefault: 10,
     },
     agentDefaults,
@@ -210,6 +211,7 @@ describe('Agent accounts → Defaults for new projects', () => {
               monitoringWakeIntervalMinutes: null,
               autoResumeOnUsageLimit: true,
               memoryLimitMb: null,
+              dispatchMaxConcurrent: null,
               worktreeRetentionDefault: 10,
             },
             // …and no `agentDefaults`.
