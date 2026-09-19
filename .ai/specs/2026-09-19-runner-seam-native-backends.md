@@ -41,7 +41,7 @@ and carry the confirmation marker. Q12–Q15 came up while designing this spec.
 | Q12 | How do Azure/xAI credentials reach codex without widening its env prefixes (#850)? | **By name, from the user's own `config.toml`**: forward exactly the variables named by the chosen provider's `env_key` / `env_http_headers`. No new static `XAI_` prefix. | Keys access to the backend's own declared configuration instead of a prefix that happens to match, which is the direction #850 asks for. | reversible |
 | Q13 | Where does the canonical runner tuple live? | **`packages/contract`** (`runners.ts`); `agent-runner.ts` re-exports it. | The contract is the one package all four workspaces already import; the service already imports contract values (AGENTS.md, repository layout). | reversible |
 | Q14 | Agent accounts (multiple logins) for `gemini` / `copilot` | **`PROFILE_ENV_VAR` = `null` for both** until a test proves one variable moves credentials *and* config. | Same rule that keeps opencode and pi `null` (`core/agent-profiles.ts:30-45`); being wrong here bills the wrong account. | reversible |
-| Q15 | Permission modes for the new runners | **`auto` maps to each CLI's own "approve everything" start mode plus an auto-answer; `ask` presets route ACP `session/request_permission` into the existing permission card.** On the per-turn `-p` fallback (where `ask_user` means deny), non-`auto` presets are refused at run start rather than silently widened. | Spec `2026-07-17-permission-modes` (default `auto` = full permissions on every backend; restrictive is opt-in). | reversible |
+| Q15 | Permission modes for the new runners | **`auto` only**: each CLI's "approve everything" start mode, plus an automatic `allow_always` answer and a `note` for any request that still arrives. Interactive presets wait for the permission-modes spec's card, which is not built yet. | Spec `2026-07-17-permission-modes` is approved but unbuilt. No runner emits `permission.requested` today, and parking on a request nothing can answer would leave the run stuck. | reversible |
 
 ## 📝 Problem Statement
 
@@ -61,7 +61,7 @@ and carry the confirmation marker. Q12–Q15 came up while designing this spec.
   `model_provider` from `config.toml` flows into `resolveModelIdentity` as `configuredProvider`
   (`agent-config/model-settings/codex.ts`, `workflows/run.ts:110`). So `azure/<deployment>` already resolves
   **if** the user's global default provider is `azure`. A user whose default is OpenAI and who wants one task on
-  Azure gets `ModelIdentityError` (`core/model-identity.ts:150-160`), and nothing in the cockpit says why. xAI is
+  Azure gets `ModelIdentityError` (`core/model-identity.ts:152-163`), and nothing in the cockpit says why. xAI is
   worse: codex's env allowlist (`core/agent-env.ts:223`) drops `XAI_API_KEY`, so a correctly configured xAI provider
   fails with an auth error from inside codex.
 - **Gemini and Copilot users cannot use their own agent.** Both CLIs have a documented headless or streaming
@@ -73,7 +73,7 @@ One seam, extended in dependency order:
 
 | Phase | Delivers | Closes | New `RunnerId` | Protected surfaces touched (BACKWARD_COMPATIBILITY.md) |
 |---|---|---|---|---|
-| 0 | Every runner enumeration derived from one tuple | — (enabler, #881 row 9) | no | none changed; §2/§3/§7 schemas are re-derived with byte-identical output |
+| 0 | Every runner enumeration derived from one tuple; `runs.json` survives unknown runner ids | — (enabler, #881 row 9) | no | §2/§7 schemas re-derived with byte-identical output; §3 loader made downgrade-safe (per-record salvage, additive) |
 | 1 | Per-task provider choice on codex from providers declared in `config.toml`; credentials by name | #583, #584 | no | §2 additive (`providers` on model defaults), §3 `runs.json` unchanged |
 | 2 | `gemini` runner (Gemini CLI over ACP) + the shared ACP client and mapper | #581 | `gemini` | §2, §3 (`runner` enum widened), §4 (workflow `runner` value added), §7 (new backend meets parity) |
 | 3 | `copilot` runner (ACP over stdio, reusing the client) | #582 | `copilot` | same as Phase 2 |
@@ -204,35 +204,62 @@ client and mapper, and each adds a runner class plus a dialect: `AGENT_PROTOCOL.
   values at runtime (`workspace/migrations.ts`), and `scripts/inline-contract.mjs` folds them into the published
   tarball. Phase 0 does not change that mechanism.
 - `PROVIDER_IDS = RUNNER_IDS` (`provider-auth.ts:7`). A provider is a runner for auth purposes today; the alias keeps the
-  name for call sites. `UiBackend` becomes `Runner` in both `ui-events.ts` files. The type-exactness test that guards
-  the mirror stays, and passes trivially.
+  name for call sites. `UiBackend` stays a literal union in both `ui-events.ts` files, because the api-client mirror
+  **must stay import-free** (`api-client/src/protocol/ui-events.ts:12`). Instead, the existing type-exactness test
+  gains an assertion that `UiBackend` equals the contract's `Runner`, so a missed edit fails typecheck. Both files
+  are the guard test's only allowlisted literal sites.
 - Every `Record<RunnerId, …>` table stays a `Record` (the compiler already enforces it). Every hand-written
   `z.object({claude, codex, opencode, pi})` becomes `perRunner(…)`, with the same per-field schema, `.optional()` and
-  `.catch()` behavior at every site.
+  `.catch()` behavior at every site. `perRunner` yields required keys, so optional-key sites add `.partial()`. The
+  `~/.cezar` schemas (`workspace/config.ts:153`, `agent-accounts.ts:127`) keep their `.passthrough()`, so unknown keys
+  survive round-trips (BACKWARD_COMPATIBILITY.md §9).
 - Cockpit literal lists and predicates (`provider-status.ts:3`, `provider-auth-alert.ts:7`, `accounts-section.tsx:147`,
-  `editor-draft.ts:217`, `thread-state.ts:73,217`, `tools-menu.tsx:32`, `e2e/tools-menu.e2e.ts:24`) import
+  `editor-draft.ts:217`, `thread-state.ts:73,217`, `e2e/tools-menu.e2e.ts:24`) import
   `RUNNER_IDS` / `runnerSchema.safeParse` from the api-client. Display-order arrays keep their order by filtering
   `RUNNER_IDS`.
 - `createRunner` (`runner-factory.ts:14-26`) keeps `claude-cli` → Claude but drops `default` in favour of an exhaustive
-  `switch` with a `never` check. An unknown id then fails typecheck instead of silently running Claude. The one caller
-  with an `undefined` input keeps its `?? 'claude'` explicitly.
+  `switch` with a `never` check. An unknown id then fails typecheck instead of silently running Claude. Today every
+  caller already passes a defined id (`planner.ts:67` and `auto-name.ts:156` a defaulted `config.defaultRunner`,
+  `run.ts:3644,4436` a `RunnerId`), so the `undefined` parameter type is dropped with it.
 - `resumeCommand()` (`server.ts:6230`) and `open-in-app.ts:133` move to a per-runner `Record<RunnerId, …>` table for the
-  same reason: today, an unknown runner resumes as `claude --resume`.
-- **Guard test (new, `runner-union.test.ts`):** greps `packages/*/src` (excluding fixtures and tests) for a literal
-  runner-id array or `=== 'pi'`-style predicate chain. It fails with the file:line and says "derive from RUNNER_IDS".
+  same reason: today, an unknown runner resumes as `claude --resume`. **The old `default` also carries records that
+  have no `runner` at all** (`RunRecord.runner` is optional, `store.ts:158`; `server.ts:4185` passes it through).
+  That behavior is kept explicitly as `run.runner ?? 'claude'` at the call site, the way `server.ts:4291` already
+  does, and a test pins "runner-less record → `claude --resume`".
+- **`runs.json` downgrade safety (BACKWARD_COMPATIBILITY.md §3).** Today `RunStore.open` parses the index as one array
+  (`store.ts:727-738`). A single record whose `runner` the running version does not know fails the whole parse, and
+  the store starts empty, so the next save **overwrites every run**. After running a Phase 2 task, a downgrade would
+  therefore silently discard history, which §3 calls breaking. Phase 0 changes the load to per-record salvage:
+  - records that fail `runRecordSchema` are kept verbatim in the store, invisible to every consumer, and re-emitted
+    unchanged on save;
+  - one warning names how many records were preserved unread.
+
+  Every version from Phase 0 on can then be downgraded to safely. Versions before Phase 0 still lose history when
+  they read a newer file, and the Phase 2/3 CHANGELOG entries say so.
+- **Guard test (new, `runner-union.test.ts`):** greps `packages/*/src` and `packages/web/e2e` (excluding fixtures and
+  unit tests) for an array or union literal naming two or more runner ids, or a `||`-chain of `=== '<runner>'`
+  comparisons over two or more ids. A single-runner branch such as `runner === 'pi'` is legitimate and is not
+  matched. It fails with the file:line and says "derive from RUNNER_IDS"; the two `ui-events.ts` files are allowlisted.
   This makes the next runner's union sites findable by the test suite, not by review.
 
 Phase 0 changes no wire shape. Proof: `contract-parity*.test.ts`, `route-parity.test.ts` and the api-client
-type-exactness test pass unchanged. A new `perRunner` unit test asserts `perRunner(z.string().optional())` parses and
+type-exactness test pass unchanged. BACKWARD_COMPATIBILITY.md §9 is corrected in passing: it lists account
+`selections` as `{claude?, codex?, opencode?}`, missing `pi`. A new `perRunner` unit test asserts `perRunner(z.string().optional())` parses and
 rejects exactly what the old literal did.
 
 ### Phase 1 — codex serves any provider the user declared
 
 **Model settings.** `model-settings/codex.ts` already reads `config.toml` (user, then project scope; see
-`readNativeSettingsFiles`). It gains one field: `declaredProviders: string[]`. That is the keys of the merged
-`[model_providers.*]` tables, plus codex's built-in provider ids (`openai`, and the OSS ids codex ships; the exact
+`readNativeSettingsFiles`). It gains one field: `declaredProviders: string[]`. That is the keys of the
+`[model_providers.*]` tables **in the user-scope file only** (`$CODEX_HOME/config.toml`, default `~/.codex`), plus codex's built-in provider ids (`openai`, and the OSS ids codex ships; the exact
 list comes from the codex version under test and is pinned in a fixture). `AgentModelSettings` gets the optional
 field for every runner; only codex fills it.
+
+Project scope contributes **nothing** to providers or credential names. Codex itself refuses provider and auth keys at
+project scope (`agent-config/catalog.ts:205`). Worse, honouring them would let a cloned repository's
+`.codex/config.toml` name any host secret as an `env_key` next to its own `base_url`, and cezar would forward the
+secret, bypassing the #427 least-privilege allowlist. A test pins that a project-scope `[model_providers.*]` changes
+neither `declaredProviders` nor the child env.
 
 **Identity.** `resolveModelIdentity(backend, raw, { configuredProvider, declaredProviders })`:
 
@@ -246,21 +273,29 @@ field for every runner; only codex fills it.
 
 **Truthful persistence (the #405 invariant).** Accepting a foreign provider is only honest if codex then uses it.
 `toBackendModel` still strips the provider (codex wants the bare model or deployment name). The codex runner receives
-a new optional `AgentRunSpec.modelProvider` and, **when it differs from the configured default**, passes it as a
-per-thread override:
+a new optional `AgentRunSpec.modelProvider` and, **whenever a model identity was resolved**, passes the provider
+explicitly (never only when it differs from the default, so the record and the request can never disagree):
 
 - the `modelProvider` field on `thread/start` / `thread/resume`. Both param types carry it in codex 0.154
   (§ Research), next to the `model` the runner already sends at `codex-app-server-runner.ts:344-357`;
 - the value is validated against `^[A-Za-z0-9._-]+$` and is always a key cezar itself read from
-  `declaredProviders`, never free text. `-c model_provider="<id>"` at spawn is kept as a fallback only if an older
-  codex rejects the field, and Step 1.1 records the minimum version.
+  `declaredProviders`, never free text;
+- an older codex might **ignore** an unknown field instead of rejecting it, which would persist `azure/x` for a run the
+  default provider served. So the runner reads the codex version it already probes, and below the minimum recorded in
+  Step 1.1 it refuses a non-default provider before spawn, with *"codex ≥ X is needed to choose a provider per task"*.
+  The default-provider path is unchanged on every version.
 
 The record then persists `{provider, model}` exactly as served. A `thread/resume` of a session that started on a
 different provider passes the *recorded* provider, not today's default.
 
-**Credentials by name (Q12).** `buildChildEnv` for `codex` gains an `extraNames` input computed by the run wiring: the
-chosen provider's `env_key` plus the env-var *values* of its `env_http_headers` map, read from the same
-`config.toml`. Names are validated as `^[A-Z_][A-Z0-9_]*$`. The static prefix list (`agent-env.ts:223`) is unchanged.
+**Credentials by name (Q12). A new env mechanism, named as such:** today `BACKEND_ALLOW_PREFIXES` only matches prefixes
+(`agent-env.ts:221-232`). This spec adds two sibling inputs, used by Phase 1 and by Phase 2:
+- a static per-backend **`BACKEND_ALLOW_NAMES`** set (exact names);
+- a per-run **`extraNames`** set computed by the run wiring.
+
+`AGENT_PROTOCOL.md` §9 step 10 is updated to say "prefixes, and exact names where a prefix would over-grant". For
+codex, `extraNames` is the chosen provider's `env_key` plus the env-var *values* of its `env_http_headers` map, read
+from the user-scope `config.toml` only. Names are validated as `^[A-Z_][A-Z0-9_]*$`. The static prefix list (`agent-env.ts:223`) is unchanged.
 `XAI_` is **not** added, which leaves no new pattern for #850 to unwind. The names are computed for the provider
 actually serving the run, including the configured default: a user whose global default is xAI gets `XAI_API_KEY`
 forwarded, which fixes today's silent drop.
@@ -324,11 +359,16 @@ further `session/prompt` calls on the same process. `interrupt()` sends `session
 that dies mid-turn rejects the pending prompt (`turn.completed{error}`), and the next message respawns and
 `session/load`s, or starts a fresh session with a `note` when load is not advertised.
 
-**Permissions (Q15), native on both runners.** `auto` → the CLI's allow-everything start mode (Gemini
-`--approval-mode yolo`; Copilot `--allow-all-tools`), plus an auto-answer of `allow_always` to any request that still
-arrives, so no prompt reaches the user. `ask`-style presets route `session/request_permission` into the existing
-permission card: the run parks `waiting`, and the user's answer is the wake source, one that exists today. A
-read-only preset → Gemini `--approval-mode plan`; for Copilot, `--deny-tool` for the write/execute tools.
+**Permissions (Q15).** Only `auto` exists in code today: the permission-modes spec (`2026-07-17-permission-modes`) is
+approved but unbuilt. No runner emits `permission.requested`, no in-run card exists, and codex hard-codes
+`approvalPolicy: 'never'` (`codex-app-server-runner.ts:350`). Phases 2–3 therefore ship `auto` only:
+- the CLI's allow-everything start mode (Gemini `--approval-mode yolo`; Copilot `--allow-all-tools`);
+- an automatic `allow_always` answer to any `session/request_permission` that still arrives, which is also emitted as
+  a `note`, so no request can park a run with nothing able to wake it (AGENTS.md, "enumerate the transitions").
+
+When permission-modes Phase 2 lands its card and answer route, the ACP runners are its most direct consumers: the
+request becomes `permission.requested`, and the answer goes back as the ACP option id. That wiring belongs to that
+spec, not this one.
 
 **Subagent nesting.** Neither CLI attributes child work on the ACP wire. The nesting parity cell uses the documented
 substitute (a `task` item with `running → completed` when the agent exposes a subagent tool), the way codex review
@@ -398,14 +438,15 @@ mode does (§6).
 ## 📝 Data Model
 
 - `runs.json` `RunRecord.runner` / `backend` (BACKWARD_COMPATIBILITY.md §3): **widened** by `gemini` (Phase 2) and
-  `copilot` (Phase 3). Widening the enum is additive, and old records parse. A record written by a newer cezar with
-  `runner: 'gemini'` is dropped by an older cezar's `safeParse` of the whole array. That is today's precedent for `pi`,
-  and the rollback note below covers it.
+  `copilot` (Phase 3). Widening the enum is additive, and old records parse. Reading a newer file on an older version
+  is covered by Phase 0's per-record salvage (§ Phase 0); versions before Phase 0 lose history on downgrade, and the
+  CHANGELOG says so.
 - `RunRecord.model` keeps `{provider, model}`. Phase 1 changes only *which* provider may legitimately appear for
   codex. No new field.
-- `AgentRunSpec.modelProvider?: string` (Phase 1). This is in-memory only (not persisted, not on the wire), and the
-  `ActiveRun` construction sites (`execute` **and** `runContinuation`) both set it. See AGENTS.md "find every
-  construction site".
+- `AgentRunSpec.modelProvider?: string` (Phase 1). This is in-memory only (not persisted, not on the wire). It is set
+  at **both** places the spec is built, the two `runner.startSession` calls (`run.ts:3664` and `run.ts:4441`),
+  through one helper that returns `{backendModel, modelProvider}`, so neither site can ship half the fix (AGENTS.md,
+  "find every construction site").
 - No new files under `.ai/cezar/` or `~/.cezar/`. Credentials stay in the environment and the vendors' own stores.
 
 ## 📝 API Contracts
@@ -431,7 +472,7 @@ Text-only (U10). The deltas:
   API-key requirement.
 - Codex model picker (Phase 1): a prefix chip per declared non-default provider, and the missing-`env_key` hint line
   in Settings → Agents → Codex.
-- Permission card (Phases 2–3): unchanged component, now reachable from `gemini` and `copilot` under `ask` presets.
+- No permission UI in this spec: `auto` only (see Q15). The permission-modes spec owns the card.
 
 ## 📝 Edge Cases & Failure Scenarios
 
@@ -440,12 +481,12 @@ Text-only (U10). The deltas:
 | `config.toml` unreadable or malformed | `declaredProviders = []`; codex behaves exactly as today (bare ids, configured provider). |
 | Explicit `azure/x` but `azure` not declared | `ModelIdentityError` before spawn, with the message naming the missing stanza and the docs link. |
 | Declared provider's `env_key` unset | Settings hint beforehand; at run time codex's auth error surfaces as `provider-auth-required` for codex with a cezar-authored hint (no vendor text). |
-| Resume of a codex thread started on another provider | The recorded provider is passed again; if that provider is no longer declared, Continue starts a fresh thread (the #974 "continue without a session" path) with a `note`. |
+| Resume of a codex thread started on another provider | The recorded provider is passed again. If that provider is no longer declared, Continue fails before spawn with the identity error naming the missing stanza, and the user picks another model; nothing is silently re-routed. |
 | Gemini individual with Google login only | Detection says `unknown` with the API-key hint; a live `UNSUPPORTED_CLIENT` becomes `provider-auth-required`. The run never hangs. |
 | Gemini exit 41 (auth) / 52 (config) / 55 (untrusted workspace) | `provider-auth-required` / `error` with a cezar-authored hint; 55 should not occur because the runner sets `GEMINI_CLI_TRUST_WORKSPACE=true`. |
-| `gemini --acp` unusable on the installed version | Per-turn `-p … --resume` fallback; non-`auto` permission presets refused at start (headless `ask_user` = deny). |
+| `gemini --acp` unusable on the installed version | Per-turn `-p … --resume` fallback with `--approval-mode yolo` (headless `ask_user` = deny). |
 | ACP child (either runner) dies mid-turn | Pending prompt rejects → `turn.completed{error}` + `error`; the next message respawns and `session/load`s if supported, otherwise a fresh session with a `note`. |
-| ACP permission request while the run is autonomous with a non-`auto` preset | Parks `waiting` with the existing autonomous warning (permission-modes spec). The wake source is the user's answer. |
+| ACP permission request arrives despite the `auto` start mode | Auto-answered `allow_always`, plus a `note`; never parks. |
 | Malformed or unknown frames (either runner) | Skipped; unknown `session/update` kinds yield no events (mapper robustness contract). |
 | `CEZ_DRY_RUN=1` | Bundled mocks; no network, no login. |
 
@@ -455,19 +496,19 @@ Text-only (U10). The deltas:
   the union sites Phase 0 rewrites. If Phase 0 lands first, each rebases once and its union-site edits collapse to one
   line. If #807 lands first, Phase 0 absorbs `cursor` into the tuple instead, with no design change. This is a direction
   call, not a defect.
-- **Older cezar reading a newer `runs.json`** (§3). A downgrade after running a `gemini`/`copilot` task drops the whole
-  array on the old version's `safeParse`. This was true for `pi` too. Mitigation: call it out in the CHANGELOG entry
-  of Phases 2 and 3; widen-the-read precedent unchanged.
+- **Older cezar reading a newer `runs.json`** (§3). Today a downgrade after one run on a new runner wipes the whole index
+  on the next save (`store.ts:727-738`). Phase 0's per-record salvage fixes this for every later version. Versions
+  before Phase 0 keep the old behavior, and the Phase 2/3 CHANGELOG entries warn about it.
 - **Vendor churn.** Gemini's flags (`--yolo` → `--approval-mode`), auth policy, and ACP maturity in Copilot all moved
   in 2026. Every runner phase starts with a verification Step against the installed CLI, and fixtures cite the version.
-- **Credential widening.** Phase 1 forwards named variables the user's own codex config names; Phases 2–3 add
-  backend-specific prefixes only. No runner gains another runner's credentials. The Vertex unlock for `gemini` follows
+- **Credential widening.** Phase 1 forwards named variables that only the user-scope codex config can name (never a
+  repository's project-scope file); Phases 2–3 add
+  backend-specific prefixes and exact names only. No runner gains another runner's credentials. The Vertex unlock for `gemini` follows
   the existing toggle pattern, keyed on Gemini's own variable.
 - **Contract-package move (Phase 0).** `RUNNER_IDS` becomes a contract value the service imports at runtime. It rides
   the existing `inline-contract.mjs` path, and `npm run test:package` proves the tarball still installs.
-- **Rollback.** Phases 0 and 1 revert cleanly (no persisted state). Reverting Phase 2 or 3 after use strands records
-  with the removed runner id. Revert with a `storedRunnerSchema` read-widening (fold to `claude`, the #547 precedent)
-  rather than a plain enum narrowing.
+- **Rollback.** Phases 0 and 1 revert cleanly (no persisted state). After Phase 0, reverting Phase 2 or 3 is safe too: records carrying the
+  removed runner id are preserved unread by the salvage path and come back if the phase is re-applied.
 - **Out of scope:** Antigravity CLI runner (named follow-up), Grok Option B, Kimi/GLM (#510/#511), routing through
   OpenCode, writing vendor config, storing provider credentials under `.ai/cezar/`.
 
@@ -498,9 +539,11 @@ Every Step leaves `npm run typecheck && npm test && npm run test:unit` green. Ev
    `workspace/config.ts`, `agent-accounts.ts`, `server.ts` bodies) with `perRunner(…)`. `contract-parity*`,
    `route-parity`, `typed-bodies` green.
 4. Exhaustive `createRunner`, `resumeCommand`, open-in-app tables; tests pin "unknown id is a type error" (a
-   `@ts-expect-error` case) and today's outputs for every current id.
-5. Cockpit literal sites → `RUNNER_IDS` / `runnerSchema`; web unit tests for order-preserving filters.
-6. `runner-union.test.ts` guard. Prove it red by reintroducing one literal list (`git stash push -- <file>` recipe,
+   `@ts-expect-error` case), today's outputs for every current id, and "runner-less record → `claude --resume`".
+5. `RunStore.open` per-record salvage. Tests: a file with one unknown-runner record loads the others, and the save
+   re-emits the unknown record byte-identically. Proven red against today's loader.
+6. Cockpit literal sites → `RUNNER_IDS` / `runnerSchema`; web unit tests for order-preserving filters.
+7. `runner-union.test.ts` guard. Prove it red by reintroducing one literal list (`git stash push -- <file>` recipe,
    AGENTS.md), then green. Update `AGENT_PROTOCOL.md` §9 step 2/8 to say "add the id to `RUNNER_IDS` in
    `packages/contract/src/runners.ts`; typecheck and `runner-union.test.ts` list the rest".
 
@@ -512,13 +555,15 @@ Every Step leaves `npm run typecheck && npm test && npm run test:unit` green. Ev
    has no Responses API, #584 is documented as unsupported and left open.
 2. `model-settings/codex.ts` → `declaredProviders` (fixture `config.toml` files: Azure stanza, xAI stanza, malformed,
    project-scope override).
-3. `resolveModelIdentity` accepts `declaredProviders`. Unit table: declared/undeclared × default/foreign × bare/explicit;
-   the #405 regression test ("foreign provider never persisted unless served") stays and is proven red without the
-   runner override.
-4. `AgentRunSpec.modelProvider` wired at **both** `ActiveRun` construction sites and all three
-   `configuredModelProvider` call sites (`run.ts:3594,3776,4406`); the codex runner passes the override; the runner
+3. `resolveModelIdentity` accepts `declaredProviders`. Unit table: declared/undeclared × default/foreign × bare/explicit.
+   The #405 invariant ("a foreign provider is never persisted unless it served the run") is pinned end to end in
+   `model-identity-wiring.test.ts` plus the codex runner test (persisted provider == `modelProvider` sent). It is
+   proven red with the runner override removed.
+4. `AgentRunSpec.modelProvider` wired through one helper at **both** `startSession` sites (`run.ts:3664,4441`), fed by
+   all three `configuredModelProvider` call sites (`run.ts:3594,3776,4406`); the codex version gate; the codex runner passes the override; the runner
    test asserts `modelProvider` on the `thread/start` and `thread/resume` payloads.
-5. `buildChildEnv` `extraNames` from the provider's `env_key` / `env_http_headers`. Tests cover: `XAI_API_KEY`
+5. `BACKEND_ALLOW_NAMES` + `extraNames` in `buildChildEnv`, from the user-scope provider's `env_key` / `env_http_headers`. Tests cover: a
+   project-scope provider contributes nothing; `XAI_API_KEY`
    forwarded only when an xAI provider serves the run; an invalid name is ignored; the claude/opencode/pi envs are
    unchanged.
 6. Contract + route: `providers` on the config answer; the cockpit prefix chips and missing-key hint; web tests.
@@ -535,9 +580,8 @@ Every Step leaves `npm run typecheck && npm test && npm run test:unit` green. Ev
 3. `core/acp-ui-mapper.ts` + `gemini-ui-mapper.ts` dialect; `__fixtures__/gemini/` covering every parity row (with the
    documented nesting substitute) + malformed and unknown-kind tests.
 4. `gemini-acp-runner.ts` (session lifecycle, cancel, respawn + `session/load`, timeout, env, trust variable) +
-   `scripts/mock-gemini-acp.mjs`; runner tests on the mock. Permission mapping: `auto` auto-answer; `ask` →
-   `permission.requested` / `permission.resolved`; a test that an unanswered request parks `waiting` and the answer
-   resumes the turn.
+   `scripts/mock-gemini-acp.mjs`; runner tests on the mock. Permission handling: `auto` start mode; a test that an
+   inbound `session/request_permission` is answered `allow_always` with a `note` and the turn continues.
 5. `'gemini'` in `RUNNER_IDS`; factory; `probeGemini`; provider-auth descriptor with the API-key hint;
    `BACKEND_ALLOW_PREFIXES` + Vertex toggle; `CEZ_GEMINI_BIN` in `.env.example` + `docs/reference.md`.
 6. Model settings, `BACKEND_MODEL_MAP`, presets, catalog entry, `resumeCommand`, open-in-app, `PROFILE_ENV_VAR = null`;
@@ -551,7 +595,7 @@ Every Step leaves `npm run typecheck && npm test && npm run test:unit` green. Ev
    prompts), model selection, tool-filter flags, usage reporting, token precedence, the auth-error shape. Capture
    fixtures.
 2. `copilot-ui-mapper.ts` dialect + `__fixtures__/copilot/` covering every parity row.
-3. `copilot-acp-runner.ts` + `scripts/mock-copilot-acp.mjs`; follow-ups, cancel, resume via `session/load`; permission
-   mapping through tool filters + the shared request handling.
+3. `copilot-acp-runner.ts` + `scripts/mock-copilot-acp.mjs`; follow-ups, cancel, resume via `session/load`;
+   `--allow-all-tools` + the shared auto-answer.
 4. `'copilot'` in `RUNNER_IDS` and the rest of §9 (detection, auth, env, `CEZ_COPILOT_BIN`, presets, catalog,
    resume, open-in-app, `PROFILE_ENV_VAR = null`, parity row, cockpit rows, dry-run e2e, opt-in real smoke).
