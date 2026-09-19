@@ -11,7 +11,7 @@
 //   CEZ_MOCK_GEMINI_DIE_MID_TURN=1 exit(1) in the middle of the first prompt
 //   CEZ_MOCK_GEMINI_NO_LOAD=1   advertise loadSession: false
 import { randomUUID } from 'node:crypto';
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import readline from 'node:readline';
 
 const env = process.env;
@@ -94,6 +94,32 @@ async function prompt(id, params) {
   } else {
     update(sessionId, { sessionUpdate: 'tool_call', ...shell, status: 'in_progress' });
     update(sessionId, { sessionUpdate: 'tool_call_update', ...shell, status: 'completed' });
+  }
+  // Like the claude mock, touch notes.md so a dry run leaves a real worktree diff (and can park at
+  // review). Reported the way Gemini reports an edit: a `replace`/`write_file` call whose update
+  // carries a `{type:'diff'}` block (`__fixtures__/gemini/tool-lifecycle.ndjson`).
+  const notesId = `write_file__call_${promptCount}3`;
+  let before = null;
+  try {
+    before = readFileSync('notes.md', 'utf8');
+  } catch {
+    before = null;
+  }
+  const line = `mock notes — ${new Date().toISOString()}: ${text.replace(/\s+/g, ' ').trim().slice(0, 400)}\n`;
+  update(sessionId, { sessionUpdate: 'tool_call', toolCallId: notesId, status: 'in_progress', title: 'notes.md', content: [], locations: [{ path: 'notes.md' }], kind: 'edit' });
+  try {
+    appendFileSync('notes.md', line);
+    update(sessionId, {
+      sessionUpdate: 'tool_call_update',
+      toolCallId: notesId,
+      status: 'completed',
+      title: 'notes.md',
+      content: [{ type: 'diff', path: 'notes.md', oldText: before ?? '', newText: `${before ?? ''}${line}`, _meta: { kind: before ? 'modify' : 'add' } }],
+      locations: [{ path: 'notes.md' }],
+      kind: 'edit',
+    });
+  } catch (error) {
+    update(sessionId, { sessionUpdate: 'tool_call_update', toolCallId: notesId, status: 'failed', content: [{ type: 'content', content: { type: 'text', text: String(error) } }], kind: 'edit' });
   }
   update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Investigating: ' } });
   update(sessionId, { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: text.split('\n').pop() ?? '' } });

@@ -1305,6 +1305,20 @@ describe('gemini provider status (#581): an environment read, never a login prob
     expect(rows.gemini!.status).toBe('connected');
   });
 
+  it('is connected when the CLI is configured for an auth method that still works (a keychain key is invisible)', async () => {
+    mkdirSync(join(geminiHome, '.gemini'));
+    writeFileSync(join(geminiHome, '.gemini', 'settings.json'), '{"security":{"auth":{"selectedType":"gemini-api-key"}}}');
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner(), platform: 'linux' }));
+    expect(rows.gemini!.status).toBe('connected');
+  });
+
+  it('a host configured only for Google sign-in is not evidence of working credentials (UNSUPPORTED_CLIENT)', async () => {
+    mkdirSync(join(geminiHome, '.gemini'));
+    writeFileSync(join(geminiHome, '.gemini', 'settings.json'), '{"security":{"auth":{"selectedType":"oauth-personal"}}}');
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner(), platform: 'linux' }));
+    expect(rows.gemini).toEqual({ status: 'unknown', hint: GEMINI_AUTH_HINT });
+  });
+
   it('is unknown — never disconnected — with the API-key hint when no credential is visible', async () => {
     const rows = await statuses(new ProviderAuthService({ runCommand: runner(), platform: 'linux' }));
     expect(rows.gemini).toEqual({ status: 'unknown', hint: GEMINI_AUTH_HINT });

@@ -25,6 +25,7 @@ import {
   geminiDialect,
   isGeminiAuthFailure,
 } from './gemini-ui-mapper.ts';
+import { geminiResumeWaitMs } from './gemini-sessions.ts';
 import type { UiEvent } from './ui-events.ts';
 
 const DEFAULT_TIMEOUT_MS = 30 * 60_000;
@@ -113,6 +114,7 @@ class GeminiAcpSession implements AgentSession {
   readonly pid?: number;
 
   private readonly child: ChildProcessWithoutNullStreams;
+  private readonly childEnv: NodeJS.ProcessEnv;
   private readonly client: AcpClient;
   private readonly hasExited: () => boolean;
   private ui: AcpUiMapperState = createGeminiUiState();
@@ -145,7 +147,8 @@ class GeminiAcpSession implements AgentSession {
     private readonly onEvent: ((event: AgentEvent) => void) | undefined,
     private readonly opts: SessionOptions,
   ) {
-    this.child = nodeSpawn(bin, buildGeminiArgs(spec), { cwd: spec.cwd, env: buildGeminiEnv(backend, spec.env) });
+    this.childEnv = buildGeminiEnv(backend, spec.env);
+    this.child = nodeSpawn(bin, buildGeminiArgs(spec), { cwd: spec.cwd, env: this.childEnv });
     this.pid = this.child.pid;
     this.hasExited = trackChildExit(this.child);
     this.child.on('error', (error: NodeJS.ErrnoException) => {
@@ -281,6 +284,15 @@ class GeminiAcpSession implements AgentSession {
     let loaded: Record<string, unknown> | undefined;
     if (this.spec.resume && this.spec.sessionId) {
       if (this.loadSupported) {
+        // Upstream bug: a load inside the session's creation minute destroys it (gemini-sessions.ts).
+        const wait = geminiResumeWaitMs(this.spec.sessionId, this.childEnv);
+        if (wait > 0) {
+          this.emit({
+            type: 'note',
+            message: `Waiting ${Math.ceil(wait / 1000)}s before resuming: Gemini CLI 0.60 destroys a session resumed in the same minute it was started`,
+          });
+          await delay(wait);
+        }
         const replayEnded = new Promise<void>((resolve) => {
           this.replayDone = resolve;
         });

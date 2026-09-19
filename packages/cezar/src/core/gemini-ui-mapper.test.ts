@@ -44,6 +44,7 @@ describe('gemini --acp → v2 golden fixtures (real Gemini CLI 0.60.0 transcript
       'cancel',
       'invalid-api-key',
       'load-replay',
+      'load-same-minute',
       'permission',
       'session-controls',
       'subagent',

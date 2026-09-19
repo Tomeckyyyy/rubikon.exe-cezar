@@ -195,6 +195,28 @@ describe('ProviderSettings', () => {
     expect(within(card('codex')).queryByRole('button', { name: 'Connect' })).toBeNull()
   })
 
+  it('shows Gemini CLI’s own API-key hint for its unknown state, where the others say verification failed (#581)', async () => {
+    const hint =
+      'Gemini CLI needs an API key (aistudio.google.com), Vertex AI, or a Workspace/Code Assist license — personal Google sign-in no longer works for Gemini CLI.'
+    serve({
+      status: {
+        providers: [
+          { provider: 'claude', status: 'connected', enabled: true },
+          { provider: 'codex', status: 'unknown', enabled: true, hint: 'Authentication could not be verified. Try again.' },
+          { provider: 'gemini', status: 'unknown', enabled: true, hint },
+        ],
+      },
+    })
+    renderSettings()
+
+    await within(card('gemini')).findByText('Could not verify')
+    expect(within(card('gemini')).getByText(hint)).toBeTruthy()
+    expect(within(card('gemini')).queryByText(/verification failed/i)).toBeNull()
+    expect(within(card('gemini')).getByRole('button', { name: 'Check again' })).toBeTruthy()
+    // Every other agent keeps the verification-failure line for `unknown`.
+    expect(within(card('codex')).getByText(/verification failed/i)).toBeTruthy()
+  })
+
   it('connects with only the provider id, then explains the terminal flow and refreshes status', async () => {
     serve()
     renderSettings()
