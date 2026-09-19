@@ -12,7 +12,7 @@ import {
   type AcpUiMapperState,
   type AcpUiMapping,
 } from './acp-ui-mapper.ts';
-import type { TokenUsage, UiBackend } from './ui-events.ts';
+import type { TokenUsage } from './ui-events.ts';
 
 /**
  * What an individual needs to run Gemini CLI today. Google retired "Sign in with Google" for Gemini
@@ -66,8 +66,7 @@ function geminiUsage(result: Record<string, unknown>): TokenUsage | undefined {
 }
 
 export const geminiDialect: AcpDialect = {
-  // TEMPORARY cast until 'gemini' joins RUNNER_IDS (Phase 2 Step 5 removes it).
-  backend: 'gemini' as UiBackend,
+  backend: 'gemini',
   toolNameOf: geminiToolName,
   // A subagent is the `invoke_agent` tool (ACP kind `think`, title "Delegating to agent '…'"). The
   // child's own work is not attributed on the wire, so this one `task` item IS the nesting cell's

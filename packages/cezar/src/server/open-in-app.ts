@@ -131,6 +131,7 @@ const AGENT_CLI_DETAILS: Record<RunnerId, { label: string; icon: string; bin: st
   codex: { label: 'Codex CLI', icon: 'codex', bin: 'codex', envBin: process.env.CEZ_CODEX_BIN },
   opencode: { label: 'OpenCode', icon: 'opencode', bin: 'opencode', envBin: process.env.CEZ_OPENCODE_BIN },
   pi: { label: 'pi CLI', icon: 'pi', bin: 'pi', envBin: process.env.CEZ_PI_BIN },
+  gemini: { label: 'Gemini CLI', icon: 'gemini', bin: 'gemini', envBin: process.env.CEZ_GEMINI_BIN },
 };
 const AGENT_CLIS = RUNNER_IDS.map((runner) => ({ runner, ...AGENT_CLI_DETAILS[runner] }));
 

@@ -6226,6 +6226,9 @@ export function resumeCommand(runner: string | undefined, sessionId: string): st
       return `opencode --session ${sessionId}`;
     case 'pi':
       return `pi --session ${sessionId}`;
+    case 'gemini':
+      // The ACP session id is the id of Gemini's own chat recording, which `--resume` accepts.
+      return `gemini --resume ${sessionId}`;
     default:
       return null;
   }

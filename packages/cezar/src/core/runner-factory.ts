@@ -2,6 +2,7 @@ import type { AgentBackend, AgentRunner, RunnerId } from './agent-runner.ts';
 import { ClaudeCliRunner } from './claude-cli-runner.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
+import { GeminiAcpRunner } from './gemini-acp-runner.ts';
 import { PiRunner } from './pi-runner.ts';
 
 /**
@@ -18,6 +19,8 @@ export function createRunner(backend: AgentBackend): AgentRunner {
       return new OpencodeServerRunner();
     case 'pi':
       return new PiRunner();
+    case 'gemini':
+      return new GeminiAcpRunner();
     case 'claude':
     case 'claude-cli':
       return new ClaudeCliRunner();

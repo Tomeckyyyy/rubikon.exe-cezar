@@ -53,6 +53,7 @@ const RUNNER_DETAILS: Record<Runner, Omit<RunnerOption, 'id'>> = {
   codex: { label: 'codex', desc: 'OpenAI Codex (app-server)' },
   opencode: { label: 'opencode', desc: 'OpenCode (serve)' },
   pi: { label: 'pi', desc: 'pi CLI (provider/model)' },
+  gemini: { label: 'gemini', desc: 'Gemini CLI (ACP)' },
 }
 export const RUNNERS: readonly RunnerOption[] = RUNNER_IDS.map((id) => ({ id, ...RUNNER_DETAILS[id] }))
 
@@ -93,6 +94,15 @@ export const MODELS_BY_RUNNER: Record<Runner, readonly ModelPreset[]> = {
     { id: 'anthropic/claude-sonnet-5', label: 'claude-sonnet-5', desc: 'via Anthropic' },
     { id: 'openai/gpt-5.1', label: 'gpt-5.1', desc: 'via OpenAI' },
   ],
+  // Gemini CLI has no host catalog in cezar: the ids its ACP `session/new` answer lists (0.60), the
+  // server's `KNOWN_PRESETS_BY_RUNNER.gemini`. A free API key serves the Flash models only.
+  gemini: [
+    { id: '', label: 'auto', desc: 'Use your Gemini CLI default model' },
+    { id: 'gemini-3.5-flash', label: 'gemini-3.5-flash', desc: 'Fast; available on a free API key' },
+    { id: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview', desc: 'Preview Flash model' },
+    { id: 'gemini-3.1-flash-lite', label: 'gemini-3.1-flash-lite', desc: 'Fastest, cheapest' },
+    { id: 'gemini-2.5-pro', label: 'gemini-2.5-pro', desc: 'Deeper reasoning (paid tiers)' },
+  ],
 }
 
 /**
@@ -108,6 +118,7 @@ export const MODELS_BY_RUNNER: Record<Runner, readonly ModelPreset[]> = {
 const NATIVE_MODEL_ID_PREFIX: Partial<Record<Runner, RegExp>> = {
   claude: /^claude[-.]/,
   codex: /^gpt[-.]/,
+  gemini: /^gemini[-.]/,
 }
 
 /** Runners that pick with the canonical `provider/model` convention and span every provider the

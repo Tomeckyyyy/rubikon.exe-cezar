@@ -20,6 +20,8 @@ const PROVIDERS = [
   { id: 'codex', label: 'Codex', login: 'codex login' },
   { id: 'opencode', label: 'OpenCode', login: 'opencode auth login' },
   { id: 'pi', label: 'pi', login: 'pi /login' },
+  // No login subcommand: `/auth` inside the interactive CLI, or GEMINI_API_KEY in the environment.
+  { id: 'gemini', label: 'Gemini CLI', login: 'gemini' },
 ] as const
 
 const providerWriteState = <T,>(value: T): Record<ProviderId, T> => ({
@@ -27,6 +29,7 @@ const providerWriteState = <T,>(value: T): Record<ProviderId, T> => ({
   codex: value,
   opencode: value,
   pi: value,
+  gemini: value,
 })
 
 const STATUS_PRESENTATION = {

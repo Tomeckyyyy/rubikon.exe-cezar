@@ -11,6 +11,7 @@ const LABELS: Record<ProviderId, string> = {
   codex: 'Codex',
   opencode: 'OpenCode',
   pi: 'pi',
+  gemini: 'Gemini CLI',
 }
 
 export interface ProviderAuthIncident {

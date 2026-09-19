@@ -1864,14 +1864,14 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
     // a parse failure, which is what keeps the enum meaningful.
     writeFileSync(
       join(dataDir, 'runs.json'),
-      JSON.stringify([{ ...LEGACY_RUN, runner: 'gemini' }]),
+      JSON.stringify([{ ...LEGACY_RUN, runner: 'no-such-runner' }]),
       'utf8',
     );
     expect(RunStore.open(dataDir).getRun('legacy-1')).toBeUndefined();
   });
 
   it('salvages an unreadable record and re-emits it unchanged on save', () => {
-    const unreadable = { ...LEGACY_RUN, id: 'future', runner: 'gemini', futureField: { keep: true } };
+    const unreadable = { ...LEGACY_RUN, id: 'future', runner: 'no-such-runner', futureField: { keep: true } };
     const readable = { ...LEGACY_RUN, id: 'known', runner: 'codex' };
     writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([unreadable, readable]), 'utf8');
 

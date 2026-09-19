@@ -56,8 +56,7 @@ export interface GeminiAcpRunnerOptions {
  * `allow_always` with a note, so no request can park a run nothing is able to wake.
  */
 export class GeminiAcpRunner implements AgentRunner {
-  // TEMPORARY cast until 'gemini' joins RUNNER_IDS (Phase 2 Step 5 removes it).
-  readonly backend = 'gemini' as AgentBackend;
+  readonly backend = 'gemini' as const;
   private readonly bin: string;
   private readonly timeoutMs: number;
   private lastSession: AgentSession | null = null;

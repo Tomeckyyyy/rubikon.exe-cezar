@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { AgentEvent } from './agent-runner.ts';
+import { detectEnvironment } from './backend-detect.ts';
+import { createRunner } from './runner-factory.ts';
 import { GEMINI_AUTH_FAILURE_MESSAGE } from './gemini-ui-mapper.ts';
 import { GeminiAcpRunner, buildGeminiArgs, geminiExitMessage } from './gemini-acp-runner.ts';
 import type { UiEvent } from './ui-events.ts';
@@ -204,6 +206,37 @@ describe('GeminiAcpRunner — failures', () => {
     await expect(
       new GeminiAcpRunner({ bin: join(tmpdir(), 'cez-gemini-does-not-exist-xyz') }).startSession({ userPrompt: 'x', cwd }).result,
     ).rejects.toThrow('install Gemini CLI');
+  });
+});
+
+describe('the gemini runner behind the seam (Step 2.5)', () => {
+  const saved = { bin: process.env.CEZ_GEMINI_BIN, dry: process.env.CEZ_DRY_RUN };
+  afterEach(() => {
+    if (saved.bin === undefined) delete process.env.CEZ_GEMINI_BIN;
+    else process.env.CEZ_GEMINI_BIN = saved.bin;
+    if (saved.dry === undefined) delete process.env.CEZ_DRY_RUN;
+    else process.env.CEZ_DRY_RUN = saved.dry;
+  });
+
+  it('createRunner maps "gemini" to the ACP runner', () => {
+    const runner = createRunner('gemini');
+    expect(runner).toBeInstanceOf(GeminiAcpRunner);
+    expect(runner.backend).toBe('gemini');
+  });
+
+  it('detection reports an absent Gemini CLI as unavailable with the install and API-key hint — never a boot failure', async () => {
+    delete process.env.CEZ_DRY_RUN;
+    process.env.CEZ_GEMINI_BIN = join(tmpdir(), 'cez-gemini-does-not-exist-xyz');
+    const gemini = (await detectEnvironment()).find((check) => check.name === 'gemini');
+    expect(gemini).toMatchObject({ available: false });
+    expect(gemini!.hint).toContain('npm i -g @google/gemini-cli');
+    expect(gemini!.hint).toContain('API key');
+  });
+
+  it('detection answers for the mock under CEZ_DRY_RUN=1', async () => {
+    process.env.CEZ_DRY_RUN = '1';
+    const gemini = (await detectEnvironment()).find((check) => check.name === 'gemini');
+    expect(gemini).toEqual({ name: 'gemini', available: true, version: 'mock (CEZ_DRY_RUN=1)' });
   });
 });
 

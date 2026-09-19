@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /** The user-selectable agent runners, in display order. */
-export const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi'] as const;
+export const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi', 'gemini'] as const;
 
 export const runnerSchema = z.enum(RUNNER_IDS);
 export type Runner = z.infer<typeof runnerSchema>;
