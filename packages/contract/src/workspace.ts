@@ -457,6 +457,7 @@ export type ProviderConnectResponse = z.infer<typeof providerConnectResponseSche
  * 400s, so the client compiles against exactly what the route accepts. One definition, used by
  * the route's query validator and by the cockpit's picker.
  */
+// runner-union: deliberate subset — only runners with a host model-discovery path belong here.
 export const modelDiscoveryRunnerSchema = z.enum(['claude', 'codex', 'opencode']);
 export type ModelDiscoveryRunner = z.infer<typeof modelDiscoveryRunnerSchema>;
 export const MODEL_DISCOVERY_RUNNERS: readonly ModelDiscoveryRunner[] =
