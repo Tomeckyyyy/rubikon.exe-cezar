@@ -1869,6 +1869,21 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
     );
     expect(RunStore.open(dataDir).getRun('legacy-1')).toBeUndefined();
   });
+
+  it('salvages an unreadable record and re-emits it unchanged on save', () => {
+    const unreadable = { ...LEGACY_RUN, id: 'future', runner: 'gemini', futureField: { keep: true } };
+    const readable = { ...LEGACY_RUN, id: 'known', runner: 'codex' };
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([unreadable, readable]), 'utf8');
+
+    const store = RunStore.open(dataDir);
+    expect(store.getRun('known')?.runner).toBe('codex');
+    expect(store.getRun('future')).toBeUndefined();
+    store.updateRun('known', { title: 'touched' });
+    store.flush();
+
+    const saved = JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8')) as unknown[];
+    expect(saved).toContainEqual(unreadable);
+  });
 });
 
 describe('RunStore — pinned tasks (#935)', () => {
