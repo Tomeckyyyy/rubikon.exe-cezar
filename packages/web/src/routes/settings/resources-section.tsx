@@ -22,8 +22,8 @@ import { SettingsField } from './settings-field'
  * `maxParallel`; a parked child woken back into its session is never re-gated (spec
  * 2026-09-20-dispatch-admission-scheduler).
  *
- * Both are workspace-level since the multi-project split (spec §"Resource governance"): they
- * protect the host, not a repo, so they live in `~/.cezar/config.json` and persist through
+ * All three are workspace-level since the multi-project split (spec §"Resource governance"):
+ * they protect the host, not a repo, so they live in `~/.cezar/config.json` and persist through
  * `PUT /api/workspace/config` — the merged answer lands straight in the workspace config query,
  * and the server refreshes the shared semaphore so a change takes effect without a restart.
  * Leftover per-repo `maxParallel`/`memoryLimitMb` keys were imported once by Migration 001 and
