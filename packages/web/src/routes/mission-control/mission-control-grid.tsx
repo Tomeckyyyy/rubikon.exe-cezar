@@ -21,9 +21,15 @@ import { useVisibleRunEvents } from './use-visible-run-events'
 export function MissionControlGrid({
   runs,
   projects,
+  highlightedRunId,
+  onHighlightRun,
 }: {
   runs: readonly RunIndexEntry[]
   projects: readonly ProjectListEntry[]
+  /** The route's currently focused run (Phase 3) — a ring around the matching tile, preserved
+   *  across a Grid⇄Graph switch because the route, not this component, owns the state. */
+  highlightedRunId?: string
+  onHighlightRun?: (runId: string) => void
 }) {
   const byId = React.useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const { active, finished } = React.useMemo(() => splitActiveRuns(runs), [runs])
@@ -48,7 +54,14 @@ export function MissionControlGrid({
         {/* Only ACTIVE tiles ever observe their own visibility (Phase 2): a finished run is
             never `running`, so `useVisibleRunEvents` on one would just be an idle
             IntersectionObserver paying rent for nothing. */}
-        <Tiles runs={active} byId={byId} counts={counts} observeVisibility />
+        <Tiles
+          runs={active}
+          byId={byId}
+          counts={counts}
+          observeVisibility
+          highlightedRunId={highlightedRunId}
+          onHighlightRun={onHighlightRun}
+        />
       </section>
 
       {finished.length > 0 ? (
@@ -63,7 +76,15 @@ export function MissionControlGrid({
             Recently finished
             <span className="font-mono text-[11px] font-medium tabular-nums">{finished.length}</span>
           </button>
-          {showFinished ? <Tiles runs={finished} byId={byId} counts={counts} /> : null}
+          {showFinished ? (
+            <Tiles
+              runs={finished}
+              byId={byId}
+              counts={counts}
+              highlightedRunId={highlightedRunId}
+              onHighlightRun={onHighlightRun}
+            />
+          ) : null}
         </section>
       ) : null}
     </div>
@@ -75,12 +96,16 @@ function Tiles({
   byId,
   counts,
   observeVisibility = false,
+  highlightedRunId,
+  onHighlightRun,
   className,
 }: {
   runs: readonly RunIndexEntry[]
   byId: ReadonlyMap<string, ProjectListEntry>
   counts: ReadonlyMap<string, number>
   observeVisibility?: boolean
+  highlightedRunId?: string
+  onHighlightRun?: (runId: string) => void
   className?: string
 }) {
   return (
@@ -95,6 +120,8 @@ function Tiles({
             run={run}
             project={byId.get(run.projectId)}
             subtaskCount={counts.get(run.id)}
+            highlighted={run.id === highlightedRunId}
+            onHighlight={onHighlightRun}
           />
         ) : (
           <AgentTile
@@ -102,6 +129,8 @@ function Tiles({
             run={run}
             project={byId.get(run.projectId)}
             subtaskCount={counts.get(run.id)}
+            highlighted={run.id === highlightedRunId}
+            onHighlight={onHighlightRun}
           />
         ),
       )}
@@ -119,10 +148,14 @@ function ObservedAgentTile({
   run,
   project,
   subtaskCount,
+  highlighted,
+  onHighlight,
 }: {
   run: RunIndexEntry
   project?: ProjectListEntry
   subtaskCount?: number
+  highlighted?: boolean
+  onHighlight?: (runId: string) => void
 }) {
   const { setNode, toolCall } = useVisibleRunEvents(run)
   return (
@@ -132,6 +165,8 @@ function ObservedAgentTile({
       project={project}
       subtaskCount={subtaskCount}
       thumbnail={toolCall}
+      highlighted={highlighted}
+      onHighlight={onHighlight}
     />
   )
 }

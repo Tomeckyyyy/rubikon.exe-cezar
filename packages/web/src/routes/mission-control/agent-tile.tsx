@@ -34,19 +34,29 @@ export interface AgentTileProps {
   /** The Swarm Graph's custom node uses the same tile at a smaller footprint. */
   compact?: boolean
   className?: string
+  /** The one run the route currently has focused (`mission-control-route.tsx`'s
+   *  `highlightedRunId`) — a ring rather than a background change, so it reads on top of the
+   *  tile's own status color instead of fighting it. Survives a Grid⇄Graph switch because the
+   *  route (not either view) owns the state. */
+  highlighted?: boolean
+  /** Fired on hover/focus, never on click — a tile's click is its navigation, and highlighting
+   *  must not compete with that. This is what lets the route's `highlightedRunId` follow the
+   *  pointer/keyboard without an extra control to operate. */
+  onHighlight?: (runId: string) => void
 }
 
 /** `ref` forwards to the rendered `<a>` — `use-visible-run-events.ts`'s IntersectionObserver
  *  needs the real DOM node to know when a tile scrolls into view. React Router's `Link` already
  *  forwards its own ref to the anchor, so this is a plain pass-through, not a second mechanism. */
 export const AgentTile = React.forwardRef<HTMLAnchorElement, AgentTileProps>(function AgentTile(
-  { run, project, subtaskCount, thumbnail, compact = false, className },
+  { run, project, subtaskCount, thumbnail, compact = false, className, highlighted = false, onHighlight },
   ref,
 ) {
   const paint = tileStatusPaint(run)
   const title = runTitle(run)
   const cost = formatCost(run.costUsd)
   const to = scopeTo(run.projectId, `/tasks/${run.id}`)
+  const highlight = onHighlight ? () => onHighlight(run.id) : undefined
 
   return (
     <Link
@@ -56,7 +66,10 @@ export const AgentTile = React.forwardRef<HTMLAnchorElement, AgentTileProps>(fun
       data-run-id={run.id}
       data-project={run.projectId}
       data-status={run.status}
+      data-highlighted={highlighted || undefined}
       title={title}
+      onMouseEnter={highlight}
+      onFocus={highlight}
       className={cn(
         'flex flex-col gap-1.5 rounded-lg border bg-card p-3 shadow-xs transition-colors hover:bg-muted',
         paint.tone === 'success' && 'border-success/40',
@@ -65,6 +78,7 @@ export const AgentTile = React.forwardRef<HTMLAnchorElement, AgentTileProps>(fun
         paint.tone === 'neutral' && 'border-border',
         paint.pulse && (paint.slow ? 'motion-safe:animate-[pulse_3s_ease-in-out_infinite]' : 'motion-safe:animate-pulse'),
         compact && 'p-2 gap-1',
+        highlighted && 'ring-2 ring-violet ring-offset-1 ring-offset-background',
         className,
       )}
     >
