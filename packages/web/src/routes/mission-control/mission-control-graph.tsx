@@ -124,12 +124,21 @@ export function MissionControlGraph({
  * this one with none of its own draws no edges at all, silently (no console warning, an empty
  * `.react-flow__edges` SVG group). `opacity: 0` keeps them invisible (this graph is read-only —
  * `nodesConnectable={false}` on `<ReactFlow>` — so there is nothing to click) while still giving
- * every edge somewhere to anchor to. */
+ * every edge somewhere to anchor to.
+ *
+ * `pointerEvents: 'none'` is equally load-bearing, not a stray style: react-flow centers each
+ * Handle right on the node's own top/bottom edge, sitting on TOP of `AgentTile`'s `<Link>` in
+ * paint order. Without this, the sliver of pointer area the Handle owns there swallows the Link's
+ * `mouseenter`/`mouseleave` at exactly that boundary — a cursor drifting by even a pixel while
+ * approaching or leaving the tile flips between the two elements, firing `onHighlight`'s
+ * set/clear/set/clear in a loop that reads as the tile's ring "pulsing" on hover (found by
+ * actually hovering a node in a real browser, not by reading the code). An invisible element the
+ * graph never lets you click or drag has no business intercepting anything. */
 function AgentTileNode({ data }: NodeProps) {
   const { run, project, subtaskCount, highlighted, onHighlight } = data as DecoratedNodeData
   return (
     <>
-      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
+      <Handle type="target" position={Position.Top} style={{ opacity: 0, pointerEvents: 'none' }} />
       <AgentTile
         run={run}
         project={project}
@@ -139,7 +148,7 @@ function AgentTileNode({ data }: NodeProps) {
         highlighted={highlighted}
         onHighlight={onHighlight}
       />
-      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0, pointerEvents: 'none' }} />
     </>
   )
 }
