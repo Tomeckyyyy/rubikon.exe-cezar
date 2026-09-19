@@ -98,7 +98,7 @@ import { parseTaskMarkers, stripTaskMarkers } from '../runs/task-markers.ts';
 import { autoNamingActive, generateRunName, liveTitleUpdatesEnabled, postValidateTitle } from '../runs/auto-name.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { resolveProfileEnvForRoot } from '../workspace/agent-profiles.ts';
-import { DEFAULT_AGENT_ACCOUNT_ID } from '../workspace/agent-accounts.ts';
+import { DEFAULT_AGENT_ACCOUNT_ID, agentAccountExistsSync } from '../workspace/agent-accounts.ts';
 import { WorkspaceSemaphore, type AccountHolds } from '../workspace/semaphore.ts';
 import { UiEventSink } from '../runs/ui-event-sink.ts';
 import type { UiEvent } from '../core/ui-events.ts';
@@ -1487,6 +1487,24 @@ export class RunManager {
       });
       return;
     }
+    // An IMPORTED task's continuation has no session to reattach (import clears every session id),
+    // so it is re-queued as a FRESH continuation instead of falling through to the workflow
+    // below — whose steps are already `done` on this machine and must not run a second time.
+    if (queuedContinuation && !sessionStep?.sessionId && run.handoff?.direction === 'in') {
+      this.pendingContinuations.set(run.id, {
+        stepId: queuedContinuation.id,
+        sessionId: undefined,
+        backend: run.runner ?? 'claude',
+        prompt: RESTART_CONTINUATION_PROMPT,
+        images: [],
+      });
+      this.queue.push(run.id);
+      this.store.appendEvent(run.id, {
+        type: 'lifecycle',
+        message: `${reason} — interrupted continuation re-queued`,
+      });
+      return;
+    }
     const workflow = await this.reviveWorkflow(run);
     if (!workflow) {
       this.store.updateRun(run.id, {
@@ -1556,6 +1574,10 @@ export class RunManager {
     const live = this.store
       .listRuns()
       .filter((r) => ['queued', 'waiting', 'running'].includes(r.status))
+      // A handed-off task is terminal by construction, so this is defence in depth: even if a
+      // record were somehow live AND marked out, the work belongs to the other machine and this
+      // process must not resume it (spec 2026-09-19-cross-machine-task-handoff).
+      .filter((r) => r.handoff?.direction !== 'out')
       .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
     // A crash never reaches `dropActive`, so its temp directory (#785) outlived the run.
     // Startup is the one moment we know which runs are still live, so sweep every other
@@ -2238,6 +2260,9 @@ export class RunManager {
     if (this.autoResumeTimers.has(runId)) return; // already promised
     const run = this.store.getRun(runId);
     if (!run || run.status !== 'failed') return;
+    // A handed-off task belongs to the other machine; reviving it here would run the same work
+    // twice on two hosts. Export also clears the pending fields, so this is the second lock.
+    if (run.handoff?.direction === 'out') return;
     // Archiving IS resigning from a task. Reviving one because a window happened to reopen would
     // be the feature working against the clearest signal the user can give it.
     if (run.archived) return;
@@ -2279,6 +2304,11 @@ export class RunManager {
     this.autoResumeTimers.delete(runId);
     const run = this.store.getRun(runId);
     if (!run || run.status !== 'failed' || !run.autoResumeAt) return;
+    // The work was handed off in the meantime — the other machine owns it now.
+    if (run.handoff?.direction === 'out') {
+      this.clearAutoResume(runId);
+      return;
+    }
     // Belt and braces against the one gap `reconcileAutoResumes` cannot close: the setting going
     // off in the window between the last pump and this tick.
     if (!this.semaphore.autoResumeOnUsageLimit()) {
@@ -2352,6 +2382,11 @@ export class RunManager {
     for (const run of this.store.listRuns()) {
       if (run.status !== 'failed' || !run.autoResumeAt) continue;
       if (this.autoResumeTimers.has(run.id)) continue;
+      // Handed off: this deadline describes work the other machine owns now.
+      if (run.handoff?.direction === 'out') {
+        this.store.updateRun(run.id, { autoResumeAt: undefined });
+        continue;
+      }
       const deadline = Date.parse(run.autoResumeAt);
       // A deadline that is unreadable, belongs to a run that has spent its cap, or belongs to a
       // task the user has archived is retired rather than re-armed: it can only mislead. One
@@ -3186,21 +3221,58 @@ export class RunManager {
     if (!['done', 'failed', 'cancelled', 'review'].includes(run.status)) {
       return { ok: false, error: `cannot continue a ${run.status} run` };
     }
+    // A task handed off to ANOTHER machine belongs to that machine now (spec
+    // 2026-09-19-cross-machine-task-handoff). Continuing it here would fork the work: the
+    // destination has the bundle and may already be working on it. Reversible on purpose —
+    // the message names the undo.
+    if (run.handoff?.direction === 'out') {
+      return {
+        ok: false,
+        error:
+          `this task was handed off to another machine — clear the handoff to continue it here: ` +
+          `cez handoff unmark ${run.id.slice(0, 8)}`,
+      };
+    }
     const sessionStep = [...run.steps].reverse().find((s) => s.sessionId);
-    if (!sessionStep?.sessionId) return { ok: false, error: 'no agent session to resume' };
+    // An IMPORTED task has no session id at all (import clears them) and is still continuable:
+    // its Continue opens a fresh backend session seeded by the handoff journal — the one
+    // mechanism that makes continuity backend-agnostic. Every other run without a session keeps
+    // the historical refusal.
+    const importedFresh = run.handoff?.direction === 'in';
+    if (!sessionStep?.sessionId && !importedFresh) return { ok: false, error: 'no agent session to resume' };
     const targetRunner = opts.runner ?? run.runner ?? 'claude';
     // Session ids are provider-owned opaque values. New records carry explicit
     // affinity; for legacy records, the run's current runner is the conservative
     // owner until a continuation emits a new, attributed session id (#562).
-    const sessionBackend = sessionStep.backend ?? run.runner ?? 'claude';
+    const sessionBackend = sessionStep?.backend ?? run.runner ?? 'claude';
     // A session id only resolves inside the config dir that created it (spec
     // 2026-07-29-agent-profiles), so switching ACCOUNT ends the session exactly like switching
     // backend does: `claude --resume <id>` under another login finds nothing and would silently
     // open a fresh conversation while the thread claimed it had resumed. A step that recorded no
     // account predates the feature and therefore ran under the discovered one.
-    const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
+    const sessionAccount = sessionStep?.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
     const accountSwitched = opts.agentProfile !== undefined && opts.agentProfile !== sessionAccount;
-    const resume = sessionBackend === targetRunner && !accountSwitched;
+    // `sessionStep` is absent for an imported task — there is nothing to resume, and the
+    // `runContinuation` call below opens a fresh session (the portable-context + journal path).
+    const resume =
+      sessionStep?.sessionId !== undefined && sessionBackend === targetRunner && !accountSwitched;
+
+    // A handed-off task pinned to an agent account must not silently run on the default login
+    // when that account does not exist here: `selectProfile` degrades an unknown id to the
+    // default, which would charge the wrong subscription for work that was pinned to another
+    // (a billing boundary, not a preference). Refuse and name the fix; the account can also be
+    // overridden from the composer, which passes `opts.agentProfile` and passes this gate.
+    if (importedFresh && opts.agentProfile === undefined) {
+      const referenced = sessionStep?.profileId ?? run.agentProfile;
+      if (referenced && referenced !== DEFAULT_AGENT_ACCOUNT_ID && !agentAccountExistsSync(referenced)) {
+        return {
+          ok: false,
+          error:
+            `this handed-off task runs under agent account "${referenced}", which does not exist on this machine — ` +
+            'add it in Settings → Agent accounts, or pick another account when continuing',
+        };
+      }
+    }
 
     // Follow-up runner/model/account override (#401, spec 2026-07-29-agent-profiles): the composer
     // lets the user pick which backend, model and login handle this continuation — the same flat
@@ -3266,7 +3338,7 @@ export class RunManager {
     if (deferForCapacity) {
       this.pendingContinuations.set(runId, {
         stepId,
-        sessionId: resume ? sessionStep.sessionId : undefined,
+        sessionId: resume ? sessionStep?.sessionId : undefined,
         backend: targetRunner,
         prompt,
         images,
@@ -3283,7 +3355,7 @@ export class RunManager {
     void this.runContinuation(
       runId,
       stepId,
-      resume ? sessionStep.sessionId : undefined,
+      resume ? sessionStep?.sessionId : undefined,
       targetRunner,
       prompt,
       images,
@@ -3332,6 +3404,15 @@ export class RunManager {
     const portableContext = record && sessionId === undefined
       ? freshContinuationContext(record, this.store.readEvents(runId))
       : undefined;
+    // A HANDED-OFF task's fresh session is seeded by its journal first (spec
+    // 2026-09-19-cross-machine-task-handoff): the portable context reconstructs the
+    // conversation, and CEZ_HANDOFF_FILE carries what the previous machine's agent wrote down as
+    // "what is done, what comes next". Naming it here is the difference between an agent that
+    // reads the journal and one that re-derives the task from a truncated transcript.
+    const journalFirst =
+      record?.handoff?.direction === 'in' && sessionId === undefined
+        ? `This task was handed off from another machine. Read your handoff file (CEZ_HANDOFF_FILE) first — it is the authoritative journal of what was already done and what comes next.\n\n`
+        : '';
     // The env is a live ceiling: a run created while the inbox was on must not keep writing
     // follow-ups after it is switched off.
     const generateFollowups = followupsEnabled() && record?.generateFollowups !== false;
@@ -3659,8 +3740,8 @@ export class RunManager {
     // The previous runner's portable context (#954) opens the session first, then the tree
     // blocks above, then the instruction that prompted this continuation.
     const contextualOpeningPrompt = portableContext
-      ? `${portableContext}\n\n---\n\n## New user instruction\n${openingPrompt}`
-      : openingPrompt;
+      ? `${journalFirst}${portableContext}\n\n---\n\n## New user instruction\n${openingPrompt}`
+      : `${journalFirst}${openingPrompt}`;
     const session = runner.startSession(
       {
         // The Continue step is a fresh agent session on the same run — the

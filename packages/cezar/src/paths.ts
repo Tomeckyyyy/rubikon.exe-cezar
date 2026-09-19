@@ -87,6 +87,26 @@ export function serverStatePath(instance: string = DEFAULT_SERVER_INSTANCE): str
 }
 
 /**
+ * The machine's cezar cache root — `~/.cache/cez`, where skills clones already live. Cached
+ * artifacts are rebuildable by definition (spec/AGENTS.md: "New state may be written, never
+ * required"), so nothing here is ever required for cezar to work.
+ *
+ * `CEZ_HOME` deliberately does NOT move this: the cache belongs to the machine's user, not to
+ * the per-user cezar workspace, and the two have different reset semantics. Callers that need a
+ * test-visible root take an explicit directory (the transfer modules all do).
+ */
+export function cezarCacheDir(): string {
+  return join(homedir(), '.cache', 'cez');
+}
+
+/** Default home of exported handoff bundles (`cez handoff export`, `cez handoff push`). Outside
+ *  the repo on purpose, so no gitignored file ever lands in the user's `git status` — the
+ *  explicit exception AGENTS.md asks every new state file to state. */
+export function handoffBundleDir(): string {
+  return join(cezarCacheDir(), 'handoff');
+}
+
+/**
  * Per-user workspace config (spec 2026-07-20-multi-project-workspace): schema
  * version, global defaults, and the project registry — every repo cezar has
  * been booted in. Lives directly under `cezarHomeDir()`, so the `CEZ_HOME`

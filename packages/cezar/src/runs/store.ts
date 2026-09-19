@@ -292,6 +292,22 @@ export const runRecordSchema = z.object({
   worktree: z.literal(false).optional(),
   /** Task worktree (spec 006) — absent for in-place runs and after explicit cleanup. */
   worktreePath: z.string().optional(),
+  /** This task's move between machines (spec `.ai/specs/2026-09-19-cross-machine-task-handoff.md`).
+   *
+   *  `out` marks a run exported from THIS machine: its work belongs to the destination now, so
+   *  Continue refuses until `cez handoff unmark` — the mark is written only after a durable bundle
+   *  write. `in` marks a run imported HERE: its Continue starts a fresh backend session seeded by
+   *  the handoff journal, because the source's session ids are dead on this machine.
+   *
+   *  One additive optional object (no migration); `at` is the export/import instant, `peer` an
+   *  optional host label that is never a credential. */
+  handoff: z
+    .object({
+      direction: z.enum(['out', 'in']),
+      at: z.string(),
+      peer: z.string().optional(),
+    })
+    .optional(),
   /** The task's own branch (`cez/<id8>`), created off `baseBranch`. */
   branch: z.string().optional(),
   /** Stable baseline for session git views: a worktree's fork ref, or an in-place run's starting commit. */
@@ -872,6 +888,37 @@ export class RunStore extends EventEmitter {
     this.pruneOldRuns();
     this.touch(run);
     return run;
+  }
+
+  /**
+   * Insert or replace one record read from a handoff bundle
+   * (spec `.ai/specs/2026-09-19-cross-machine-task-handoff.md`).
+   *
+   * The same scheduling and `run` emission as `createRun` — never a direct `runs.json` write —
+   * so a live cockpit sees an imported task appear over SSE, and the debounced save keeps the
+   * atomic tmp+rename guarantee. The record is validated against `runRecordSchema` FIRST: a
+   * malformed record must be refused, not inserted, or it would poison `runs.json` for every
+   * later boot (the loader `safeParse`s the whole array, so one bad row would drop them all —
+   * BACKWARD_COMPATIBILITY §3's exact failure mode). Replacing by id makes a re-run of an
+   * interrupted import idempotent.
+   *
+   * Normalization (clearing dead session ids and auto-resume fields, setting `handoff`) belongs
+   * to the importer — `transfer/import.ts` — not here: the store's job is to persist a valid
+   * record, not to know what a handoff is.
+   */
+  importRun(record: unknown): { ok: true; run: RunRecord } | { ok: false; error: string } {
+    const parsed = runRecordSchema.safeParse(record);
+    if (!parsed.success) {
+      const detail = parsed.error.issues[0]
+        ? `${parsed.error.issues[0].path.join('.')}: ${parsed.error.issues[0].message}`
+        : 'invalid shape';
+      return { ok: false, error: `malformed run record (${detail})` };
+    }
+    const run = parsed.data;
+    this.runs.set(run.id, run);
+    this.pruneOldRuns();
+    this.touch(run);
+    return { ok: true, run };
   }
 
   updateRun(id: string, patch: Partial<Omit<RunRecord, 'id' | 'steps'>>): RunRecord | undefined {

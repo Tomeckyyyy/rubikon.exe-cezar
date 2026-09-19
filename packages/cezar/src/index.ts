@@ -37,6 +37,8 @@ import { runProjectsCommand } from './workspace/projects-cli.ts';
 import { WorkspaceSemaphore } from './workspace/semaphore.ts';
 import { runTaskCommand } from './dispatch/task-cli.ts';
 import { runAutomationCommand } from './automations/automation-cli.ts';
+import { runHandoffCommand } from './transfer/cli.ts';
+import { releaseInstanceLock, writeInstanceLock } from './transfer/live.ts';
 
 const HELP = `cezar — local cockpit for AI agent tasks in your repo
 
@@ -45,6 +47,7 @@ Usage:
   cezar run "<task>"        run a task headless in the terminal
   cezar task <create|report|list>  dispatch or report from inside a running task (CEZ_DISPATCH=0 turns it off)
   cezar automation <add|create|check|run|list|…>  create and manage automations (GitHub polls, schedules) on a running cockpit
+  cezar handoff <export|import|push|list|unmark>  move finished tasks between machines (over ssh, no daemon)
   cezar init                scaffold .ai/cezar/ (example workflow + skill)
   cezar projects            list the projects this cockpit serves
                             (also: projects add [<dir>] · projects remove <id>)
@@ -91,6 +94,11 @@ async function main(): Promise<void> {
   // `cez automation …` (spec 2026-09-13-automations-from-prompt): same shape, same reason.
   if (process.argv[2] === 'automation') {
     process.exitCode = await runAutomationCommand(process.argv.slice(3));
+    return;
+  }
+  // `cez handoff …` (spec 2026-09-19-cross-machine-task-handoff): same shape, same reason.
+  if (process.argv[2] === 'handoff') {
+    process.exitCode = await runHandoffCommand(process.argv.slice(3), { version: readOwnVersion() });
     return;
   }
   const { values, positionals } = parseArgs({
@@ -265,6 +273,10 @@ async function serveCommand(
   // Set before the first run can start, read by every manager's `agentEnv` while dispatch is on.
   process.env.CEZ_API_URL = `http://127.0.0.1:${port}`;
   process.env.CEZ_BIN = resolve(process.argv[1] ?? fileURLToPath(import.meta.url));
+  // Heartbeats for `cez handoff` (spec 2026-09-19-cross-machine-task-handoff): a live instance
+  // owns its projects' runs.json, so export/import refuse while one is running (transfer/live.ts).
+  // Every REGISTERED root gets one, because this server can lazily build any of them.
+  const releaseInstanceLocks = await armInstanceLocks(repoRoot, { port, allProjects: true });
   startServer({
     repoRoot,
     store,
@@ -293,6 +305,7 @@ async function serveCommand(
   await printSkillsBanner(repoRoot);
 
   const shutdown = () => {
+    releaseInstanceLocks();
     store.flush();
     process.exit(0);
   };
@@ -393,6 +406,10 @@ async function runCommand(
   const semaphore = new WorkspaceSemaphore();
   await semaphore.refresh();
   const manager = new RunManager(store, repoRoot, { semaphore });
+  // A headless run owns runs.json while it executes, so `cez handoff` must treat it like a
+  // served project (transfer/live.ts). A crash leaves a stale heartbeat, which the next reader
+  // detects by pid liveness; the explicit release below is the happy path.
+  const releaseInstanceLock = await armInstanceLocks(repoRoot);
 
   store.on('event', ({ event }) => {
     switch (event.type) {
@@ -436,6 +453,7 @@ async function runCommand(
   }
   console.log(`\nrun ${final} — ${record?.tokensUsed ?? 0} tokens — details in the cockpit: npx cezar`);
   process.exitCode = final === 'done' || final === 'review' ? 0 : 1;
+  releaseInstanceLock();
 }
 
 // ---- server-install / server-uninstall --------------------------------------
@@ -644,6 +662,32 @@ description: House rules the agent should follow in this repo.
 }
 
 // ---- helpers -----------------------------------------------------------------
+
+/**
+ * Heartbeats that tell `cez handoff` a live instance owns a project's `runs.json`
+ * (`transfer/live.ts`). One file per root: `serve` claims every registered project, because it
+ * can lazily build any of them; `cezar run` claims only its own. Best-effort by contract — a
+ * read-only home degrades to "cannot detect", never a boot failure — and released on shutdown,
+ * with a stale file self-healing on the next read.
+ */
+async function armInstanceLocks(
+  repoRoot: string,
+  opts: { port?: number; allProjects?: boolean } = {},
+): Promise<() => void> {
+  const roots = new Set<string>([repoRoot]);
+  if (opts.allProjects) {
+    try {
+      const config = await loadWorkspaceConfig();
+      for (const project of config.projects) roots.add(project.root);
+    } catch {
+      // unreadable registry — the boot root alone still covers the common case
+    }
+  }
+  for (const root of roots) writeInstanceLock(root, opts.port !== undefined ? { port: opts.port } : {});
+  return () => {
+    for (const root of roots) releaseInstanceLock(root);
+  };
+}
 
 function openStore(repoRoot: string, opts?: { keepLive?: boolean }): RunStore {
   const dataDir = join(repoRoot, '.ai/cezar');

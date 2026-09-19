@@ -130,6 +130,23 @@ export const processUsageSchema = z.object({
 export type ProcessUsage = z.infer<typeof processUsageSchema>;
 
 /**
+ * This task's move between machines (spec
+ * `.ai/specs/2026-09-19-cross-machine-task-handoff.md`), stored on the record exactly as
+ * `src/runs/store.ts` persists it — the same shape on disk and on the wire.
+ *
+ * `out` = exported from this machine: Continue refuses until `cez handoff unmark` (or the
+ * cockpit's Import/Unmark action). `in` = imported here: Continue starts a fresh backend
+ * session seeded by the handoff journal, because the source's session ids are dead here.
+ * `at` is the export/import instant, `peer` an optional host label — never a credential.
+ */
+export const runHandoffSchema = z.object({
+  direction: z.enum(['out', 'in']),
+  at: z.string(),
+  peer: z.string().optional(),
+});
+export type RunHandoff = z.infer<typeof runHandoffSchema>;
+
+/**
  * The stored run record, as `runs.json` holds it (`src/runs/store.ts`).
  *
  * `archived` is required although the store schema defaults it: a default fills on PARSE, so the
@@ -253,6 +270,9 @@ export const runRecordSchema = z.object({
   worktree: z.literal(false).optional(),
   /** Absent for in-place runs and after an isolated worktree is removed. */
   worktreePath: z.string().optional(),
+  /** The task's move between machines (spec `.ai/specs/2026-09-19-cross-machine-task-handoff.md`)
+   *  — exported (`out`) or imported (`in`). Absent on every run that never travelled. */
+  handoff: runHandoffSchema.optional(),
   branch: z.string().optional(),
   /** Stable baseline for session git views: a worktree's fork ref, or an in-place run's starting commit. */
   baseBranch: z.string().optional(),
@@ -363,6 +383,10 @@ export const runIndexEntrySchema = z.object({
   /** The task's branch, when it has one — a column on the global page, and the one field that
    *  makes a cross-project row identifiable at a glance without opening it. */
   branch: z.string().optional(),
+  /** The task's move between machines (spec `.ai/specs/2026-09-19-cross-machine-task-handoff.md`):
+   *  the global Tasks page paints a handed-off/imported badge from it, and the project-scoped list
+   *  reads it off the fat record. Absent on every run that never travelled. */
+  handoff: runHandoffSchema.optional(),
   /** The run's place in a dispatch tree (spec 2026-09-10-dispatch): the two keys the global
    *  page needs to nest a child under its parent, and the child's `kind` so a row can say
    *  `review` or `implement` next to its title. Absent on a plain task. */
