@@ -91,9 +91,9 @@ mode; no other backend/contract changes.
 
 ### Phase 2: Live tool-call thumbnail
 
-- [ ] 2.1 Explicit-project per-run SSE variant + use-visible-run-events.ts
-- [ ] 2.2 Wire thumbnail into AgentTile
-- [ ] 2.3 Visibility/subscription tests
+- [x] 2.1 Explicit-project per-run SSE variant + use-visible-run-events.ts — 7922a87c
+- [x] 2.2 Wire thumbnail into AgentTile — 7922a87c
+- [x] 2.3 Visibility/subscription tests — 7922a87c
 
 ### Phase 3: Swarm Graph
 
