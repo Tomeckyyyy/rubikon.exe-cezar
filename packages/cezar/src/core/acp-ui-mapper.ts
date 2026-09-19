@@ -100,6 +100,23 @@ export function endAcpReplay(state: AcpUiMapperState): AcpUiMapperState {
   return state.replaying ? { ...state, replaying: false } : state;
 }
 
+/**
+ * A turn the transport lost: the agent died or was stopped mid-prompt, so no answer frame will
+ * ever come. With a `message` it settles exactly as an error answer would (`session.error`, then
+ * `turn.completed{error}`); without one it settles with `stopReason` — `cancelled` for a stop cezar
+ * asked for, `timeout` for the run's own deadline.
+ */
+export function abortAcpTurn(
+  state: AcpUiMapperState,
+  dialect: AcpDialect,
+  stopReason: StopReason,
+  message?: string,
+): AcpUiMapping {
+  return message !== undefined
+    ? completeTurn(state, dialect, undefined, { message })
+    : completeTurn(state, dialect, undefined, undefined, stopReason);
+}
+
 export function mapAcpFrame(input: AcpFrame | unknown, state: AcpUiMapperState, dialect: AcpDialect): AcpUiMapping {
   if (!isRecord(input) || (input.dir !== 'in' && input.dir !== 'out') || !isRecord(input.frame)) return NONE(state);
   const frame = input.frame;
@@ -318,13 +335,14 @@ function completeTurn(
   dialect: AcpDialect,
   result: Record<string, unknown> | undefined,
   error: Record<string, unknown> | undefined,
+  forced?: StopReason,
 ): AcpUiMapping {
   const closed = closeText(state);
   const events = [...closed.events];
   let next = closed.state;
   if (!next.turnId) return { events, state: next };
 
-  const stopReason: StopReason = error ? 'error' : stopReasonOf(result?.stopReason);
+  const stopReason: StopReason = error ? 'error' : forced ?? stopReasonOf(result?.stopReason);
   // Tools a cancelled or failed turn left running would spin forever: settle them as failed.
   if (stopReason !== 'end_turn') {
     const tools = new Map(next.tools);
