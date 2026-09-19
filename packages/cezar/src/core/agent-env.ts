@@ -329,7 +329,7 @@ export function buildChildEnv(opts: BuildChildEnvOptions): NodeJS.ProcessEnv {
     return { ...full, ...extra };
   }
 
-  const backendPrefixes = BACKEND_ALLOW_PREFIXES[opts.backend] ?? BACKEND_ALLOW_PREFIXES.claude;
+  const backendPrefixes = BACKEND_ALLOW_PREFIXES[opts.backend] ?? BACKEND_ALLOW_PREFIXES.claude ?? [];
   const passthrough = upperSet(
     (readVar(source, 'CEZ_ENV_PASSTHROUGH') ?? '')
       .split(',')

@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { RunnerId } from '../core/agent-runner.ts';
+import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 
 /**
  * The catalog of coding-agent config files cezar can surface and edit (spec
@@ -285,7 +285,7 @@ export const CONFIG_FILES: ConfigFileDef[] = [
   // ---- Shared: <repo>/AGENTS.md is read by BOTH Codex and OpenCode ----
   {
     id: 'project.agents',
-    runners: ['codex', 'opencode'],
+    runners: RUNNER_IDS.slice(1, 3),
     kind: 'memory',
     scope: 'project',
     resolve: (repo) => join(repo, 'AGENTS.md'),

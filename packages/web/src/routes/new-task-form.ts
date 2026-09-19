@@ -124,9 +124,7 @@ const NATIVE_MODEL_ID_PREFIX: Partial<Record<Runner, RegExp>> = {
  *  native id space (`claude-…`, `gpt-…`), which a `provider/model` runner cannot claim either
  *  way, so a bare vendor id stays a cross-runner mismatch on pi and OpenCode as much as it is
  *  on the other backends. */
-const PROVIDER_SPANNING_RUNNERS: readonly Runner[] = RUNNER_IDS.filter(
-  (runner) => runner === 'opencode' || runner === 'pi',
-)
+const PROVIDER_SPANNING_RUNNERS: readonly Runner[] = RUNNER_IDS.slice(2, 4)
 
 /** Keep recognized presets from another backend out of a runner's custom-model escape hatch
  * (#480).

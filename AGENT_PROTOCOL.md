@@ -411,7 +411,7 @@ To be first-class:
    `AgentSession` (persistent process; `pid`; `sendMessage`/`end`/`interrupt`;
    `result`). Honor `AgentRunSpec` uniformly — use `prependSystemPrompt` if the
    backend has no native system-prompt channel.
-2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`) and
+2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`packages/contract/src/runners.ts`) and
    a `case` in `createRunner` (`runner-factory.ts`). Add `UiBackend` in
    `ui-events.ts` **and its mirror** `packages/api-client/src/protocol/ui-events.ts` (the
    type-exactness test guards drift).
@@ -431,7 +431,8 @@ To be first-class:
 7. **Parity** — add the id to `BACKENDS` in `ui-parity.test.ts`; every capability
    row must pass. (If the backend has no wire parent attribution, document the
    nesting cell's substitute the way codex's review-mode items are handled.)
-8. **Plumbing** — the run-store `runner` enum, workflow step schema, the
+8. **Plumbing** — add the id to `RUNNER_IDS` in `packages/contract/src/runners.ts`; typecheck and
+   `runner-union.test.ts` list the remaining plumbing sites: the run-store `runner` enum, workflow step schema, the
    `POST /api/runs` / `PUT /api/config` bodies, `resumeCommand()`, the web
    `Runner` type, composer pills/presets, and Settings → Agents. Keep additive
    so old `runs.json` records still parse (the `runner` enum keeps `claude-cli`

@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import type { Runner } from '@open-mercato/cezar-contract';
 
 const exec = promisify(execFile);
 
 export interface BackendCheck {
-  name: 'claude' | 'codex' | 'opencode' | 'pi' | 'gh' | 'git';
+  name: Runner | 'gh' | 'git';
   available: boolean;
   version?: string;
   hint?: string;
