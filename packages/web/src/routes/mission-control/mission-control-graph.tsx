@@ -5,6 +5,8 @@ import * as React from 'react'
 
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
+import { useTheme } from '@/components/theme-provider'
+
 import { AgentTile } from './agent-tile'
 import { taskTreeToFlow, type MissionControlFlowNodeData } from './task-tree-to-flow'
 
@@ -39,6 +41,7 @@ export function MissionControlGraph({
 }) {
   const byId = React.useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const { nodes, edges } = React.useMemo(() => taskTreeToFlow(runs), [runs])
+  const { resolvedTheme } = useTheme()
 
   // Highlight/project join lives in each node's OWN `data`, not in `nodeTypes` — react-flow warns
   // (and, worse, actually remounts every custom node) when `nodeTypes` is a new object on every
@@ -67,6 +70,14 @@ export function MissionControlGraph({
         nodes={decoratedNodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        // React Flow otherwise defaults to `colorMode="light"`, which stamps its own root div
+        // with a `.light` class — and this codebase's OWN theme convention (`styles/index.css`)
+        // reads `.light` globally, unscoped, to flip every `--card`/`--foreground` CSS variable
+        // to the light palette. Left unset, that collision forces every tile inside the Swarm
+        // Graph into light-theme colors regardless of the app's actual theme — `bg-card` and the
+        // tile's (unset, inherited) text color both resolve to white, rendering the title
+        // invisible. Wiring it to the app's own resolved theme is what keeps the two in sync.
+        colorMode={resolvedTheme}
         fitView
         proOptions={{ hideAttribution: true }}
         nodesDraggable={false}

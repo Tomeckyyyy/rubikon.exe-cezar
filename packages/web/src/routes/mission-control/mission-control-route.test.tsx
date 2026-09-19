@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
+import { ThemeProvider } from '@/components/theme-provider'
 import type { ProjectListEntry, RunIndexEntry, WorkspaceUiState } from '@open-mercato/cezar-api-client'
 
 import { MissionControlRoute } from './mission-control-route'
@@ -104,11 +105,15 @@ afterEach(() => {
 
 function renderRoute() {
   return render(
-    <QueryClientProvider client={createQueryClient()}>
-      <MemoryRouter initialEntries={['/mission-control']}>
-        <MissionControlRoute />
-      </MemoryRouter>
-    </QueryClientProvider>,
+    // ThemeProvider, because the Swarm Graph reads `useTheme()` to keep react-flow's own
+    // `colorMode` in sync with the app's theme (App.tsx always mounts one above every route).
+    <ThemeProvider>
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter initialEntries={['/mission-control']}>
+          <MissionControlRoute />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </ThemeProvider>,
   )
 }
 
