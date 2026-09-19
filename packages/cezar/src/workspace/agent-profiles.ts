@@ -45,6 +45,8 @@ export function defaultAgentProfile(
   let path = home.claude;
   if (provider === 'codex') path = home.codex;
   if (provider === 'opencode') path = home.opencodeConfig;
+  // Without this the discovered Gemini account claimed Claude's folder (the fall-through above).
+  if (provider === 'gemini') path = home.gemini;
   return {
     id: DEFAULT_AGENT_ACCOUNT_ID,
     provider,
