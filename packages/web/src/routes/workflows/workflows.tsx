@@ -28,11 +28,11 @@ import {
   WandSparklesIcon,
   XIcon,
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router'
 
 import { ApiError, createWorkflow, deleteWorkflow, parseWorkflow, postPlan } from '@/api/client'
-import { queryKeys, useSkills, useUiState, useWorkflows } from '@/api/queries'
+import { queryKeys, useHealth, useRuns, useSkills, useUiState, useWorkflows } from '@/api/queries'
 import type { Skill, WorkflowDef, WorkflowStepDef } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { SkillEmptyHintCompact } from '@/components/skill-empty-hint'
@@ -50,8 +50,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toaster'
+import { WorkflowStatsRow } from '@/components/workflow-stats-row'
 import { isProjectSkill, orderSkillsByUsage } from '@/lib/skills'
+import { usageMetricVisibility } from '@/lib/token-metrics'
 import { cn } from '@/lib/utils'
+import { computeWorkflowStats } from '@/lib/workflow-stats'
 import {
   WB_MAX_STEPS,
   draftFromPlan,
@@ -124,6 +127,8 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
   const workflowsQuery = useWorkflows()
   const skillsQuery = useSkills()
   const uiStateQuery = useUiState()
+  const runsQuery = useRuns()
+  const healthQuery = useHealth()
   const queryClient = useQueryClient()
 
   const [draft, setDraft] = useState<Draft | null>(null)
@@ -146,6 +151,10 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
   // The palette lists skills the way every other picker does (#519): most-used first, then
   // project, then global — so what you reach for floats to the top.
   const paletteSkills = orderSkillsByUsage(skills, uiStateQuery.data?.skillUsage)
+  // Run history (spec 2026-09-19-workflow-outcome-stats): computed client-side from runs the
+  // cockpit already fetches, filtered per-workflow at render time — no new route, no new state.
+  const allWorkflowStats = useMemo(() => computeWorkflowStats(runsQuery.data ?? []), [runsQuery.data])
+  const usageVisibility = usageMetricVisibility(healthQuery.data)
 
   // First visit seeds the canvas with the deep-linked workflow when the URL names one, else
   // the repo's first saved workflow — "open the tab, see your flow" (legacy rule). No files
@@ -435,6 +444,15 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
                 </Button>
               </div>
             </div>
+
+            {savedFile ? (
+              <div className="mt-2">
+                <WorkflowStatsRow
+                  groups={allWorkflowStats.filter((group) => group.workflow === trimmedName)}
+                  usage={usageVisibility}
+                />
+              </div>
+            ) : null}
 
             {/* Load chips: every known workflow, plus "+ new" — the legacy edit row. */}
             <div data-slot="wb-load" className="mt-3 flex flex-wrap items-center gap-1.5">
