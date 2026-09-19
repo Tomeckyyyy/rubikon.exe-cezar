@@ -1,6 +1,6 @@
 import '@xyflow/react/dist/style.css'
 
-import { Background, ReactFlow, type Node, type NodeProps, type NodeTypes } from '@xyflow/react'
+import { Background, Handle, Position, ReactFlow, type Node, type NodeProps, type NodeTypes } from '@xyflow/react'
 import * as React from 'react'
 
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
@@ -91,17 +91,28 @@ export function MissionControlGraph({
 }
 
 /** A `NodeProps`-shaped wrapper so `AgentTile` (a plain component, shared with the Grid) can be
- *  react-flow's custom node content without knowing anything about react-flow itself. */
+ *  react-flow's custom node content without knowing anything about react-flow itself.
+ *
+ * The two `Handle`s are load-bearing, not decoration: react-flow only auto-attaches connection
+ * points to its OWN built-in node types (`default`/`input`/`output`) — a custom node type like
+ * this one with none of its own draws no edges at all, silently (no console warning, an empty
+ * `.react-flow__edges` SVG group). `opacity: 0` keeps them invisible (this graph is read-only —
+ * `nodesConnectable={false}` on `<ReactFlow>` — so there is nothing to click) while still giving
+ * every edge somewhere to anchor to. */
 function AgentTileNode({ data }: NodeProps) {
   const { run, project, highlighted, onHighlight } = data as DecoratedNodeData
   return (
-    <AgentTile
-      run={run}
-      project={project}
-      compact
-      className="w-[220px]"
-      highlighted={highlighted}
-      onHighlight={onHighlight}
-    />
+    <>
+      <Handle type="target" position={Position.Top} style={{ opacity: 0 }} />
+      <AgentTile
+        run={run}
+        project={project}
+        compact
+        className="w-[220px]"
+        highlighted={highlighted}
+        onHighlight={onHighlight}
+      />
+      <Handle type="source" position={Position.Bottom} style={{ opacity: 0 }} />
+    </>
   )
 }
