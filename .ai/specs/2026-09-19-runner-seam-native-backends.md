@@ -1,0 +1,557 @@
+# Runner seam: native backends — seam de-duplication, provider identity, Gemini and Copilot runners
+
+> Slug: `runner-seam-native-backends` · Status: **designed, awaiting implementation** ·
+> Issues: #581 (Gemini CLI runner), #582 (Copilot CLI runner over ACP), #583 (Azure-hosted models
+> on codex), #584 (Grok on a native agent CLI) · Handoff brief:
+> [`briefs/2026-09-19-runner-seam-native-backends.md`](briefs/2026-09-19-runner-seam-native-backends.md) ·
+> Delivery: **four phases, one implementation PR each** (`om-auto-implement-spec` per phase).
+
+## 📝 TLDR
+
+Today cezar runs four native coding-agent CLIs (`claude`, `codex`, `opencode`, `pi`). Adding a fifth
+means editing ~50 places that still list the runner ids by hand, and you can use Azure or xAI models
+on codex only after editing `~/.codex/config.toml` by hand, with no per-task choice. Gemini and
+Copilot users cannot drive their own CLI from cezar at all. This spec proposes, in four
+independently shippable phases:
+
+0. deriving every runner enumeration from one tuple, so a new backend is one line plus typecheck;
+1. letting codex serve any provider the user already declared in `config.toml` (Azure, xAI, …)
+   per task, with the provider recorded truthfully and credentials forwarded by name, not by prefix;
+2. a `gemini` runner over Gemini CLI's Agent Client Protocol mode (`gemini --acp`);
+3. a `copilot` runner over the same protocol (`copilot --acp --stdio`), reusing Phase 2's ACP client.
+
+## Resolved assumptions (autonomous defaults)
+
+Rows U1–U11 come from the handoff brief. Rows the brief marked *human* keep its recommendation
+and carry the confirmation marker. Q12–Q15 came up while designing this spec.
+
+| # | Question | Applied answer | Why | Confirm? |
+|---|---|---|---|---|
+| U1 | Split the four issues into separate specs? | **No — one spec, four phases**, each its own implementation PR. | Triage comment on #581–#584 (2026-07-21) and #881 Wave 1 row 9; the phases share one seam and one provider-identity decision. | reversible |
+| U2 | Explicit Phase 0 (seam de-duplication)? | **Yes**, merged before any new runner. | Halves the diff of every later runner PR and of Cursor (#807). | reversible |
+| U3 | Provider identity model | **Build on the existing `configuredProvider` path**: widen it to the *declared* provider set read from `config.toml`, and pass the chosen provider to codex explicitly per run. No generic served-provider set in `BACKEND_MODEL_MAP`. | Keeps the #405 invariant (only persist a provider that served the run) with the smallest contract change; see § Phase 1. | ⚠ NEEDS HUMAN CONFIRMATION |
+| U4 | Document or generate the `model_providers` entry? | **Document.** cezar never writes `~/.codex/config.toml`. | `agent-config/catalog.ts` treats vendor config as the user's file; config writes are localHandoff-gated (AGENTS.md). | reversible |
+| U5 | #584: codex + custom provider (A) or a dedicated Grok runner (B)? | **Option A**, conditional on xAI serving the Responses API (codex removed `wire_api = "chat"`). If Step 1.1 finds it does not, #584 is documented as unsupported on codex and stays open. Option B stays out of scope. | No official headless xAI coding CLI was found. Option A needs no new `RunnerId`, and the Phase 1 mechanism is provider-agnostic, so nothing is built specifically for xAI. | reversible |
+| U6 | Gemini: one long-lived process or a new process per turn? | **One long-lived process over ACP** (`gemini --acp`), follow-ups as further `session/prompt` calls, resume via `session/load`. Headless `-p` with `--resume` per turn is the documented fallback, not the design. | Gemini CLI 0.60 ships an ACP mode with `loadSession`, `cancel` and token counts (§ Research). That beats both options the brief listed, and it shares a client with Copilot. | ⚠ NEEDS HUMAN CONFIRMATION |
+| U7 | Copilot: ACP stdio server or one-shot commands? | **ACP stdio server** (`copilot --acp --stdio`), persistent. | Issue #582 preference; same shape as the codex JSON-RPC runner. | reversible |
+| U8 | Cover Kimi (#510) and GLM (#511)? | **No**, but Phase 1's declared-provider path is backend-agnostic, so an Anthropic-compatible provider on `claude` can reuse it later. | Bounds the spec. | reversible |
+| U9 | Merge order vs Cursor (#807) and multi-model harness (#925) | **Phase 0 first; #807 and #925 rebase onto it.** | Phase 0 is small and mechanical; rebasing a runner onto it removes edits rather than adding them. | ⚠ NEEDS HUMAN CONFIRMATION |
+| U10 | Mockups for this spec PR | **Text-only.** | No test-env descriptor (`.ai/qa/test-env.json` absent); the UI deltas are a pill and a hint line. | reversible |
+| U11 | Which Google CLI does the `gemini` runner drive? | **Gemini CLI**, for users with an API key, Vertex, or a Workspace/Code Assist license. Its detection hint must say individuals need an API key. **Antigravity CLI (`agy`) is a named follow-up runner**, not part of this spec. | Google retired "Sign in with Google" for Gemini CLI on 2026-06-18 (google-gemini/gemini-cli#28229); `agy` is the free individual successor, with a different wire format. | ⚠ NEEDS HUMAN CONFIRMATION |
+| Q12 | How do Azure/xAI credentials reach codex without widening its env prefixes (#850)? | **By name, from the user's own `config.toml`**: forward exactly the variables named by the chosen provider's `env_key` / `env_http_headers`. No new static `XAI_` prefix. | Keys access to the backend's own declared configuration instead of a prefix that happens to match, which is the direction #850 asks for. | reversible |
+| Q13 | Where does the canonical runner tuple live? | **`packages/contract`** (`runners.ts`); `agent-runner.ts` re-exports it. | The contract is the one package all four workspaces already import; the service already imports contract values (AGENTS.md, repository layout). | reversible |
+| Q14 | Agent accounts (multiple logins) for `gemini` / `copilot` | **`PROFILE_ENV_VAR` = `null` for both** until a test proves one variable moves credentials *and* config. | Same rule that keeps opencode and pi `null` (`core/agent-profiles.ts:30-45`); being wrong here bills the wrong account. | reversible |
+| Q15 | Permission modes for the new runners | **`auto` maps to each CLI's own "approve everything" start mode plus an auto-answer; `ask` presets route ACP `session/request_permission` into the existing permission card.** On the per-turn `-p` fallback (where `ask_user` means deny), non-`auto` presets are refused at run start rather than silently widened. | Spec `2026-07-17-permission-modes` (default `auto` = full permissions on every backend; restrictive is opt-in). | reversible |
+
+## 📝 Problem Statement
+
+- **The seam still costs ~50 hand edits per runner.** `RUNNER_IDS` (`packages/cezar/src/core/agent-runner.ts:24`)
+  is meant to be the single source of truth, but the tuple is repeated by hand in
+  `packages/contract/src/health.ts:4` and `:17`, `core/provider-auth.ts:7`, `core/ui-events.ts:28` and its mirror
+  `packages/api-client/src/protocol/ui-events.ts:19`, `core/backend-detect.ts:7`, and eight or more per-runner
+  `z.object({claude, codex, opencode, pi})` shapes across `packages/contract/src/workspace.ts`,
+  `contract/src/agent-profiles.ts:98-103`, `server/server.ts:3097,5645`, `config.ts:98`,
+  `workspace/config.ts:153` and `workspace/agent-accounts.ts:127`. The cockpit repeats it again in
+  `web/src/lib/provider-status.ts:3`, `lib/provider-auth-alert.ts:7`, `routes/settings/accounts-section.tsx:147`,
+  `routes/automations/editor-draft.ts:217`, `routes/task-thread/thread-state.ts:73,217`,
+  `components/tools-menu.tsx:32` and `web/e2e/tools-menu.e2e.ts:24`. A `z.object` literal that misses the new id still
+  typechecks, and the value is dropped silently. Adding `pi` touched 68 files (PR #470), and Cursor (PR #807) is
+  now paying the same cost.
+- **Azure and xAI models on codex work only by accident of configuration.** Since PR #726, codex's
+  `model_provider` from `config.toml` flows into `resolveModelIdentity` as `configuredProvider`
+  (`agent-config/model-settings/codex.ts`, `workflows/run.ts:110`). So `azure/<deployment>` already resolves
+  **if** the user's global default provider is `azure`. A user whose default is OpenAI and who wants one task on
+  Azure gets `ModelIdentityError` (`core/model-identity.ts:150-160`), and nothing in the cockpit says why. xAI is
+  worse: codex's env allowlist (`core/agent-env.ts:223`) drops `XAI_API_KEY`, so a correctly configured xAI provider
+  fails with an auth error from inside codex.
+- **Gemini and Copilot users cannot use their own agent.** Both CLIs have a documented headless or streaming
+  surface (#581, #582), and cezar has no runner for either.
+
+## 📝 Proposed Solution
+
+One seam, extended in dependency order:
+
+| Phase | Delivers | Closes | New `RunnerId` | Protected surfaces touched (BACKWARD_COMPATIBILITY.md) |
+|---|---|---|---|---|
+| 0 | Every runner enumeration derived from one tuple | — (enabler, #881 row 9) | no | none changed; §2/§3/§7 schemas are re-derived with byte-identical output |
+| 1 | Per-task provider choice on codex from providers declared in `config.toml`; credentials by name | #583, #584 | no | §2 additive (`providers` on model defaults), §3 `runs.json` unchanged |
+| 2 | `gemini` runner (Gemini CLI over ACP) + the shared ACP client and mapper | #581 | `gemini` | §2, §3 (`runner` enum widened), §4 (workflow `runner` value added), §7 (new backend meets parity) |
+| 3 | `copilot` runner (ACP over stdio, reusing the client) | #582 | `copilot` | same as Phase 2 |
+
+**Alternatives considered and rejected:**
+
+- *Route Azure and Grok through OpenCode.* The issues were revised on 2026-07-21 to require native CLIs; it adds a
+  second runtime and no capability.
+- *A generic "served-provider set" in `BACKEND_MODEL_MAP`* (#583 candidate 2). It hard-codes in cezar which providers
+  codex may serve, while codex already knows: the user's `model_providers` table *is* that set. Reading it keeps
+  cezar ignorant of vendors (the #548 "no provider allowlist" rule, `model-identity.ts:48-56`).
+- *`providerByModel`* (#583 candidate 1). It is keyed by bare model id, and Azure deployment names are user-chosen,
+  so the keys collide.
+- *A dedicated Grok runner* (#584 Option B). No official headless xAI coding CLI exists (see § Research).
+- *Antigravity CLI instead of Gemini CLI now* (U11 option b). `agy` is what individuals can log in to for free, but its
+  wire format (`init` / `step_update` / `result`), keyring credentials and permission model are all different and
+  unverified in cezar. Gemini CLI is what #581 asked for and what API-key, Vertex and Workspace users run. Keeping the
+  mapper and fixture layout per CLI lets `agy` land later as its own runner id without reshaping this one.
+- *One `gemini` id with two transports* (U11 option c). Rejected: a runner id that means two different binaries breaks
+  `resumeCommand()`, detection, the auth probe and fixtures, all of which key on the id.
+
+## 📝 Research (verified 2026-09-19; re-verify at implementation time)
+
+Versions: codex 0.154/0.155, Gemini CLI 0.60, Copilot CLI (`@github/copilot`) 1.0.x. Facts marked *unverified* must
+be confirmed in the phase's first Step against the installed CLI before code depends on them.
+
+Method: `--help` output, the documentation and JS bundle shipped in the installed `@google/gemini-cli` 0.60.0
+package, strings in the codex 0.154.0 binary, and the codex app-server's own JSON schema
+(`codex app-server generate-json-schema`, offline). Web access was not available to the research step, so rows
+marked *unverified* come from prior knowledge. Each phase's first Step re-checks them.
+
+**Codex (Phase 1)**
+
+- `thread/start` and `thread/resume` both accept `modelProvider: string | null` and a free-form `config` object
+  (`ThreadStartParams` / `ThreadResumeParams` in `codex_app_server_protocol.v2.schemas.json`, codex 0.154.0).
+  `codex app-server` also accepts `-c key=value` at spawn. A per-thread provider is therefore a documented request
+  field, not a config write. **Verified.**
+- `wire_api = "chat"` is removed. The binary rejects it with "set `wire_api = "responses"`". Any provider cezar
+  documents must be a Responses-API provider. **Verified.**
+- The `model_providers` keys are `base_url`, `env_key`, `env_key_instructions`, `query_params`, `http_headers`,
+  `env_http_headers`, `experimental_bearer_token`, `requires_openai_auth`, plus retry/timeout keys. There is also a
+  command-based auth-token struct, a likely Entra ID route whose key names are *unverified*. **Verified** (binary
+  strings).
+- Codex recognizes Azure by host substring (`openai.azure.`, `cognitiveservices.azure.`, `aoai.azure.`, `azure-api.`,
+  `windows.net/openai`) but ships **no built-in Azure provider entry**, so the user defines `[model_providers.azure]`.
+  What the host match changes on the wire is *unverified*. **Verified** (binary strings).
+- Azure stanza: `base_url = "https://<resource>.openai.azure.com/openai/v1"`, `env_key = "AZURE_OPENAI_API_KEY"`,
+  `wire_api = "responses"`, model = deployment name, no `api-version` on the v1 endpoint (older endpoints need
+  `query_params`). **Unverified**; confirmed in Step 1.1 before `docs/providers.md` states it.
+- xAI: no built-in entry (`x.ai` and `XAI_API_KEY` absent from the binary). Whether `https://api.x.ai/v1` serves the
+  **Responses** API is *unverified*, and it is the deciding fact for #584 now that `chat` is gone. No official
+  headless xAI coding CLI was found. The known `grok-cli` projects are community-made (*unverified* as of 2026-09).
+
+**Gemini CLI 0.60.0 (Phase 2)** (all **verified** against the installed package unless marked)
+
+- **ACP mode exists:** `gemini --acp` (`--experimental-acp` deprecated), JSON-RPC over stdio
+  (`docs/cli/acp-mode.md`). It advertises `loadSession: true` and image prompts, implements `newSession`,
+  `loadSession`, `prompt`, `cancel`, `authenticate`, `setSessionMode`, `unstable_setSessionModel`, and emits
+  `agent_message_chunk`, `agent_thought_chunk`, `tool_call`, `tool_call_update`, `user_message_chunk`,
+  `available_commands_update`. Token counts arrive on the `prompt` result as
+  `_meta.quota.token_count{input_tokens,output_tokens}` (+ per-model `model_usage`). No `plan` update kind was found.
+- Headless `-p --output-format stream-json` is one prompt per process (`init`, `message`, `tool_use`, `tool_result`,
+  `error`, `result{stats}`). `--resume <uuid>` and `--session-id <uuid>` work in `-p` mode. Stdin is not a follow-up
+  channel.
+- Exit codes: 41 auth, 42 input, 44 sandbox, 52 config, 53 turn limit, 54 tool execution, 55 untrusted workspace,
+  130 cancelled.
+- `--approval-mode default|auto_edit|yolo|plan`. `--yolo` and `--allowed-tools` are deprecated (the Policy Engine
+  replaces them). In headless mode a policy `ask_user` is treated as **deny**.
+- Env: `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`,
+  `GOOGLE_APPLICATION_CREDENTIALS`, `GEMINI_MODEL`, `GEMINI_CLI_HOME` (moves the whole `.gemini` home),
+  `GEMINI_CLI_TRUST_WORKSPACE`. `GOOGLE_GENAI_USE_VERTEXAI` was not found in the bundled env reference
+  (*unverified*).
+- Quotas (bundled docs): free API key 250 requests/day, Flash only; Workspace Standard 1,500/day.
+- **Auth reality:** the bundled 0.60 docs still describe "Sign in with Google" for individuals, but on this host on
+  2026-09-19 a completed Google login failed every request with `IneligibleTierError UNSUPPORTED_CLIENT`
+  (handoff README §4 item 8; google-gemini/gemini-cli#28229). The spec designs for the observed behavior: individuals
+  need an API key.
+
+**Copilot CLI (Phase 3)**
+
+- The ACP method set (from the ACP SDK bundled with Gemini CLI, `PROTOCOL_VERSION = 1`): `initialize`, `session/new`,
+  `session/load`, `session/prompt`, `session/cancel`, `session/update`, `session/request_permission`,
+  `session/set_mode`, `session/set_model`, `session/set_config_option`, `session/list`, `session/resume`,
+  `session/close`. Agents advertise optional ones (`loadSession`) in `initialize`. **Verified** for the protocol.
+- `copilot --acp --stdio`, token precedence `COPILOT_GITHUB_TOKEN` > `GH_TOKEN` > `GITHUB_TOKEN`, `copilot login`,
+  config in `~/.copilot`, `--allow-tool` / `--deny-tool` / `--allow-all-tools` / `--model`, and whether usage is
+  reported over ACP: **unverified**. Issue #582 cites the GitHub docs (`copilot-cli-reference/acp-server`). Step 3.1
+  confirms each against the installed CLI.
+
+**Antigravity CLI (`agy`)**: not installed and not researched beyond the handoff README; nothing here depends on
+it.
+
+## 📝 Architecture
+
+```mermaid
+flowchart LR
+  subgraph contract["packages/contract (Phase 0: canonical)"]
+    RI["RUNNER_IDS + runnerSchema\n+ perRunner(schema)"]
+  end
+  RI --> AR["core/agent-runner.ts\n(re-export)"]
+  RI --> PA["core/provider-auth.ts\nPROVIDER_IDS = RUNNER_IDS"]
+  RI --> WEB["cockpit via api-client"]
+  AR --> RF["runner-factory.ts\n(exhaustive switch)"]
+  RF --> C[codex runner]
+  RF --> G["gemini runner (Phase 2, new)"]
+  RF --> CP["copilot runner (Phase 3, new)"]
+  G --> ACP["core/acp-client.ts + acp-ui-mapper.ts\n(new, shared)"]
+  CP --> ACP
+  CT["~/.codex/config.toml\nmodel_providers (user-owned)"] -. read-only .-> MS["model-settings/codex.ts\ndeclared providers (Phase 1)"]
+  MS --> MI["resolveModelIdentity\n(declaredProviders)"]
+  MS --> ENV["buildChildEnv\n(env_key names)"]
+  MI --> C
+  ENV --> C
+```
+
+The takeaway: Phase 0 turns the runner set into data that flows from the contract package outward. Phase 1 changes
+only codex's model-settings strategy, the identity resolver's input, and the env builder. Phases 2–3 share one ACP
+client and mapper, and each adds a runner class plus a dialect: `AGENT_PROTOCOL.md` §9, with the transport written once.
+
+### Phase 0 — one tuple, derived everywhere
+
+- `packages/contract/src/runners.ts` (new) owns `RUNNER_IDS`, `runnerSchema = z.enum(RUNNER_IDS)`, `type Runner`, and
+  a helper `perRunner<S>(schema: S)` that builds `z.object({[id]: schema})` for every id with the keys typed as
+  `Record<Runner, S>`. The helper uses a mapped type over the tuple so the inferred shape keeps literal keys, and
+  `contract-parity*.test.ts` stays green. `health.ts:4` and `:17` import it; check names become
+  `z.enum([...RUNNER_IDS, 'gh', 'git'])`.
+- `core/agent-runner.ts` re-exports `RUNNER_IDS` / `RunnerId` from the contract. The service already imports contract
+  values at runtime (`workspace/migrations.ts`), and `scripts/inline-contract.mjs` folds them into the published
+  tarball. Phase 0 does not change that mechanism.
+- `PROVIDER_IDS = RUNNER_IDS` (`provider-auth.ts:7`). A provider is a runner for auth purposes today; the alias keeps the
+  name for call sites. `UiBackend` becomes `Runner` in both `ui-events.ts` files. The type-exactness test that guards
+  the mirror stays, and passes trivially.
+- Every `Record<RunnerId, …>` table stays a `Record` (the compiler already enforces it). Every hand-written
+  `z.object({claude, codex, opencode, pi})` becomes `perRunner(…)`, with the same per-field schema, `.optional()` and
+  `.catch()` behavior at every site.
+- Cockpit literal lists and predicates (`provider-status.ts:3`, `provider-auth-alert.ts:7`, `accounts-section.tsx:147`,
+  `editor-draft.ts:217`, `thread-state.ts:73,217`, `tools-menu.tsx:32`, `e2e/tools-menu.e2e.ts:24`) import
+  `RUNNER_IDS` / `runnerSchema.safeParse` from the api-client. Display-order arrays keep their order by filtering
+  `RUNNER_IDS`.
+- `createRunner` (`runner-factory.ts:14-26`) keeps `claude-cli` → Claude but drops `default` in favour of an exhaustive
+  `switch` with a `never` check. An unknown id then fails typecheck instead of silently running Claude. The one caller
+  with an `undefined` input keeps its `?? 'claude'` explicitly.
+- `resumeCommand()` (`server.ts:6230`) and `open-in-app.ts:133` move to a per-runner `Record<RunnerId, …>` table for the
+  same reason: today, an unknown runner resumes as `claude --resume`.
+- **Guard test (new, `runner-union.test.ts`):** greps `packages/*/src` (excluding fixtures and tests) for a literal
+  runner-id array or `=== 'pi'`-style predicate chain. It fails with the file:line and says "derive from RUNNER_IDS".
+  This makes the next runner's union sites findable by the test suite, not by review.
+
+Phase 0 changes no wire shape. Proof: `contract-parity*.test.ts`, `route-parity.test.ts` and the api-client
+type-exactness test pass unchanged. A new `perRunner` unit test asserts `perRunner(z.string().optional())` parses and
+rejects exactly what the old literal did.
+
+### Phase 1 — codex serves any provider the user declared
+
+**Model settings.** `model-settings/codex.ts` already reads `config.toml` (user, then project scope; see
+`readNativeSettingsFiles`). It gains one field: `declaredProviders: string[]`. That is the keys of the merged
+`[model_providers.*]` tables, plus codex's built-in provider ids (`openai`, and the OSS ids codex ships; the exact
+list comes from the codex version under test and is pinned in a fixture). `AgentModelSettings` gets the optional
+field for every runner; only codex fills it.
+
+**Identity.** `resolveModelIdentity(backend, raw, { configuredProvider, declaredProviders })`:
+
+- explicit `provider/model` where the provider ∈ `declaredProviders` → accepted, even when it differs from
+  `configuredProvider`;
+- explicit provider not declared → today's `ModelIdentityError`, with a better message: *"codex has no provider
+  `xai` — add `[model_providers.xai]` to ~/.codex/config.toml (see docs/providers.md#xai)"*;
+- bare id → unchanged (`configuredProvider` → `defaultProvider`).
+
+`BACKEND_MODEL_MAP` does not change, so no backend's bare-id behavior moves.
+
+**Truthful persistence (the #405 invariant).** Accepting a foreign provider is only honest if codex then uses it.
+`toBackendModel` still strips the provider (codex wants the bare model or deployment name). The codex runner receives
+a new optional `AgentRunSpec.modelProvider` and, **when it differs from the configured default**, passes it as a
+per-thread override:
+
+- the `modelProvider` field on `thread/start` / `thread/resume`. Both param types carry it in codex 0.154
+  (§ Research), next to the `model` the runner already sends at `codex-app-server-runner.ts:344-357`;
+- the value is validated against `^[A-Za-z0-9._-]+$` and is always a key cezar itself read from
+  `declaredProviders`, never free text. `-c model_provider="<id>"` at spawn is kept as a fallback only if an older
+  codex rejects the field, and Step 1.1 records the minimum version.
+
+The record then persists `{provider, model}` exactly as served. A `thread/resume` of a session that started on a
+different provider passes the *recorded* provider, not today's default.
+
+**Credentials by name (Q12).** `buildChildEnv` for `codex` gains an `extraNames` input computed by the run wiring: the
+chosen provider's `env_key` plus the env-var *values* of its `env_http_headers` map, read from the same
+`config.toml`. Names are validated as `^[A-Z_][A-Z0-9_]*$`. The static prefix list (`agent-env.ts:223`) is unchanged.
+`XAI_` is **not** added, which leaves no new pattern for #850 to unwind. The names are computed for the provider
+actually serving the run, including the configured default: a user whose global default is xAI gets `XAI_API_KEY`
+forwarded, which fixes today's silent drop.
+
+**Discoverability.** The `GET …/config` answer (`server.ts:5520-5545`) gains an additive
+`providers?: Partial<Record<Runner, {configured?: string; declared: string[]}>>`, a contract schema in
+`packages/contract` (via `perRunner`). The cockpit's codex model picker:
+
+- groups presets under the configured provider, as today;
+- offers each declared non-default provider as a prefix chip (`azure/`, `xai/`), so typing a deployment name
+  produces `azure/<deployment>`;
+- shows a one-line hint in Settings → Agents → Codex when a declared provider has an `env_key` that is unset in the
+  environment: *"`AZURE_OPENAI_API_KEY` is not set — codex will fail to authenticate with `azure`"*. It shows the
+  name only, never a value.
+
+The codex model catalog (`core/codex-model-catalog.ts`, `model/list`) is not changed: whether `model/list` reflects a
+custom provider's models is version-dependent. Deployment names are user-chosen, so free text plus the prefix chip is
+the reliable path.
+
+**Docs.** `docs/providers.md` (new, linked from `docs/reference.md`) gives the `config.toml` stanzas for Azure OpenAI /
+Foundry and for xAI, taken from § Research, with the variable names and the "cezar never edits this file" note.
+
+### The shared ACP layer (built by whichever of Phases 2 and 3 merges first)
+
+Gemini CLI (`gemini --acp`) and Copilot CLI (`copilot --acp --stdio`) both speak the Agent Client Protocol. The
+v2 `UiEvent` vocabulary was modelled on ACP (`permission.requested` already carries ACP option kinds;
+permission-modes spec). So the two runners share one transport and one mapper, and each adds a thin runner class:
+
+- **`core/acp-client.ts`** (transport only, no vendor knowledge): JSON-RPC 2.0 over NDJSON stdio, request-id
+  bookkeeping and timeouts, following `codex-app-server-transport.ts`, with a never-throwing line reader (`ndjson.ts`).
+  It supports `initialize` (protocol version 1; client capabilities `fs: false`, `terminal: false`, so the agent uses
+  its own tools inside `cwd`), `session/new {cwd, mcpServers: []}`, `session/load` when advertised, `session/prompt`,
+  `session/cancel`, `session/set_mode` / `session/set_model` when advertised, and inbound `session/update` and
+  `session/request_permission`.
+- **`core/acp-ui-mapper.ts`** (pure, `(frame, state) → {events, state}`, never throws), parameterised by a small
+  per-agent `AcpDialect` (`usageFromPromptResult`, `planFromToolCall`, `toolNameOf`). The per-runner files
+  `gemini-ui-mapper.ts` / `copilot-ui-mapper.ts` required by `AGENT_PROTOCOL.md` §9 step 4 are those dialects plus a
+  re-export. Fixtures, the mapper test and the parity row stay **per runner**, so each CLI's real wire is pinned
+  separately.
+
+| ACP | v2 `UiEvent` | v1 |
+|---|---|---|
+| `session/new` / `session/load` result `sessionId` | `session.started` | `session` |
+| `session/prompt` sent | `turn.started` | — |
+| `agent_message_chunk` | message item + `item.delta` text | `text` |
+| `agent_thought_chunk` | reasoning item | — |
+| `tool_call` (`toolCallId`, `kind`, `title`, `rawInput`, `status`) | tool item `running`; ACP `kind` (`read`/`edit`/`execute`/`search`/`fetch`/`think`/`other`) → `ToolKind` directly | `tool-call` |
+| `tool_call_update` (`status`, `content` incl. `{type:'diff'}`) | tool `completed` / `failed`; diff content → `diffs` | `tool-result` |
+| `plan` (`entries`) | `plan.updated` (full replacement) | — |
+| dialect `planFromToolCall` (Gemini's `write_todos` tool input) | `plan.updated` | — |
+| dialect `usageFromPromptResult` (Gemini: `_meta.quota.token_count`) / `usage_update` | `usage.updated` raw counts | `token-usage` |
+| `session/prompt` result `stopReason` (`end_turn`, `max_tokens`, `max_turn_requests`, `refusal`, `cancelled`) | `turn.completed` with that `StopReason` (`max_turn_requests` → `max_tokens`) | `turn-end` |
+| `session/request_permission` | `permission.requested`, then `permission.resolved` on the answer | `note` |
+| `user_message_chunk`, `available_commands_update`, unknown kinds | no events | — |
+
+**Session lifecycle (both runners).** One child and one ACP session per cezar session. The first turn runs
+`session/new` (or `session/load` with the recorded id when `spec.resume`) and then `session/prompt` with text plus
+image blocks. `systemPrompt` is prepended to the first prompt, since neither CLI has a native channel. Follow-ups are
+further `session/prompt` calls on the same process. `interrupt()` sends `session/cancel`: the pending prompt resolves
+`cancelled` and the session stays usable. `end()` closes stdin, then SIGTERM after the shared grace period. A child
+that dies mid-turn rejects the pending prompt (`turn.completed{error}`), and the next message respawns and
+`session/load`s, or starts a fresh session with a `note` when load is not advertised.
+
+**Permissions (Q15), native on both runners.** `auto` → the CLI's allow-everything start mode (Gemini
+`--approval-mode yolo`; Copilot `--allow-all-tools`), plus an auto-answer of `allow_always` to any request that still
+arrives, so no prompt reaches the user. `ask`-style presets route `session/request_permission` into the existing
+permission card: the run parks `waiting`, and the user's answer is the wake source, one that exists today. A
+read-only preset → Gemini `--approval-mode plan`; for Copilot, `--deny-tool` for the write/execute tools.
+
+**Subagent nesting.** Neither CLI attributes child work on the ACP wire. The nesting parity cell uses the documented
+substitute (a `task` item with `running → completed` when the agent exposes a subagent tool), the way codex review
+mode does (§6).
+
+### Phase 2 — `gemini` runner (Gemini CLI over ACP, #581)
+
+- **Transport:** `gemini --acp [--model m] [--approval-mode …]` in `spec.cwd`, with `GEMINI_CLI_TRUST_WORKSPACE=true` in
+  the per-run env. Task worktrees are new directories, and an untrusted workspace exits 55. Model changes mid-thread
+  (#954) use `unstable_setSessionModel` when advertised, otherwise the next turn respawns with `--model` and
+  `session/load`.
+- **Fallback (U6):** if Step 2.1 finds `--acp` unusable on the installed version, the runner uses
+  `gemini -p … --output-format stream-json --resume <uuid>` with one child per turn. This is the Cursor v1 precedent
+  (#807), and the mapping for that path is recorded beside the fixtures. The `AgentSession` contract stays the same.
+- **Exit codes** (child death outside a prompt): 41 → `provider-auth-required`; 52 / 55 → `error` with a cezar-authored
+  hint ("Gemini config invalid" / "workspace not trusted"); others → `error`.
+- **Detection and auth:** `probeGemini()` in `backend-detect.ts` (`gemini --version`, `CEZ_GEMINI_BIN`). The
+  `provider-auth.ts` descriptor reads the environment, because Gemini has no `status` subcommand:
+  - `GEMINI_API_KEY` / `GOOGLE_API_KEY`, or a Vertex project → `connected`;
+  - otherwise `unknown`, with the hint *"Gemini CLI needs an API key (aistudio.google.com), Vertex AI, or a
+    Workspace/Code Assist license — personal Google sign-in no longer works for Gemini CLI."*;
+  - an ACP `authenticate` requirement, exit 41, or `UNSUPPORTED_CLIENT` becomes `provider-auth-required` with that same
+    hint, never the raw vendor text.
+- **Credentials:** `BACKEND_ALLOW_PREFIXES.gemini = ['GEMINI_']` plus the names `GOOGLE_API_KEY`,
+  `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`. `GOOGLE_APPLICATION_CREDENTIALS` is forwarded **only when** Gemini's
+  own Vertex selector is on (the variable is confirmed in Step 2.1). That is the Bedrock/Vertex toggle shape
+  (`agent-env.ts:256-266`), keyed on the backend's own variable (the #850 direction).
+- **Everything else from §9:**
+  - `'gemini'` in `RUNNER_IDS` (one line after Phase 0) and the factory case;
+  - `CEZ_GEMINI_BIN` in `.env.example` and `docs/reference.md`;
+  - `scripts/mock-gemini-acp.mjs` for `CEZ_DRY_RUN=1`;
+  - fixtures under `__fixtures__/gemini/` citing `docs/cli/acp-mode.md` and the version;
+  - the `BACKENDS` row in `ui-parity.test.ts`;
+  - `model-settings/gemini.ts` (reads `model.name` from `~/.gemini/settings.json` / project `.gemini/settings.json`,
+    and `GEMINI_MODEL`);
+  - `BACKEND_MODEL_MAP.gemini = { defaultProvider: 'google' }`;
+  - `KNOWN_PRESETS_BY_RUNNER.gemini` (a guard, not a whitelist; the ids are taken from the CLI at implementation time);
+  - `agent-config/catalog.ts` entries for `settings.json` and `GEMINI.md`;
+  - `resumeCommand` → `gemini --resume <id>`, and open-in-app;
+  - `PROFILE_ENV_VAR.gemini = null` (Q14). `GEMINI_CLI_HOME` is the candidate once a test proves it moves the OAuth
+    credentials too.
+
+### Phase 3 — `copilot` runner (Copilot CLI over ACP, #582)
+
+- **Transport:** `copilot --acp --stdio` in `spec.cwd`, with the tool filters (server-start options) and `--model`
+  from the permission mode and run spec. It uses the shared ACP layer above. The Copilot dialect decides where usage
+  comes from (Step 3.1: `usage_update`, the prompt result's `_meta`, or none). If Copilot reports no usage at all,
+  `usage.updated` degrades per capability with a documented substitute, and this is recorded in `AGENT_PROTOCOL.md` §4.
+- **Detection and auth:** `probeCopilot()` (`copilot --version`, `CEZ_COPILOT_BIN`). The `provider-auth.ts` descriptor
+  reports `connected` when a token (`COPILOT_GITHUB_TOKEN` / `GH_TOKEN` / `GITHUB_TOKEN`) is present or the CLI's
+  stored login is detected; the login command is `copilot login`. An ACP auth error on `session/new` becomes
+  `provider-auth-required`.
+- **Credentials:** `BACKEND_ALLOW_PREFIXES.copilot = ['COPILOT_']`. The `gh` names are already forwarded to every
+  backend (`GH_ALLOW_NAMES`, `agent-env.ts:237-243`), so nothing else is widened.
+- **Everything else from §9**, as in Phase 2:
+  - `'copilot'` in `RUNNER_IDS`, the factory case, `CEZ_COPILOT_BIN`;
+  - `scripts/mock-copilot-acp.mjs`;
+  - fixtures citing agentclientprotocol.com and GitHub's ACP-server reference;
+  - the parity row;
+  - `model-settings/copilot.ts`;
+  - `BACKEND_MODEL_MAP.copilot`: `{}` if Copilot's model ids span vendors (a bare id then fails loud), or
+    `{ defaultProvider: 'github' }` if its ids are provider-less; decided in Step 3.1 from the model list the CLI
+    prints;
+  - `resumeCommand` → `copilot --resume <id>`, and open-in-app;
+  - `PROFILE_ENV_VAR.copilot = null` (Q14).
+
+## 📝 Data Model
+
+- `runs.json` `RunRecord.runner` / `backend` (BACKWARD_COMPATIBILITY.md §3): **widened** by `gemini` (Phase 2) and
+  `copilot` (Phase 3). Widening the enum is additive, and old records parse. A record written by a newer cezar with
+  `runner: 'gemini'` is dropped by an older cezar's `safeParse` of the whole array. That is today's precedent for `pi`,
+  and the rollback note below covers it.
+- `RunRecord.model` keeps `{provider, model}`. Phase 1 changes only *which* provider may legitimately appear for
+  codex. No new field.
+- `AgentRunSpec.modelProvider?: string` (Phase 1). This is in-memory only (not persisted, not on the wire), and the
+  `ActiveRun` construction sites (`execute` **and** `runContinuation`) both set it. See AGENTS.md "find every
+  construction site".
+- No new files under `.ai/cezar/` or `~/.cezar/`. Credentials stay in the environment and the vendors' own stores.
+
+## 📝 API Contracts
+
+- **Phase 0:** none changed. `runnerSchema` moves files; its JSON is identical.
+- **Phase 1:** `GET /api/v1/config` (and its `/p/:projectId` alias) gains optional
+  `providers?: {[runner]: {configured?: string, declared: string[]}}`, a schema in `packages/contract`, chained route
+  unchanged, `contract-parity` both directions. BACKWARD_COMPATIBILITY.md §2 lists it as additive.
+- **Phases 2–3:** every body/param that carries `runnerSchema` (`POST /api/v1/runs`, `PUT /api/v1/config`,
+  `PUT /api/v1/workspace/config` `agentDefaults`, automations, agent accounts, `GET /api/v1/models?runner=`) accepts the
+  new id automatically, via Phase 0. `GET /api/v1/health` `checks[].name` gains `gemini` / `copilot`. Health is the
+  most externally depended-on shape (§2), and adding an enum member there is additive: consumers must already tolerate
+  unknown check names, since `pi` did this in August. Workflow YAML `runner:` (§4) gains two values, and none is
+  removed.
+- v1 `AgentEvent` / v2 `UiEvent` (§7): no new types. Both runners emit only existing event types and `StopReason`s.
+
+## 📝 UI/UX
+
+Text-only (U10). The deltas:
+
+- Composer runner pills and Settings → Agents gain **Gemini** and **Copilot** rows (Phases 2–3). They are disabled
+  with the detection hint when the CLI is absent, never hidden, matching `pi`. The Gemini row's hint states the
+  API-key requirement.
+- Codex model picker (Phase 1): a prefix chip per declared non-default provider, and the missing-`env_key` hint line
+  in Settings → Agents → Codex.
+- Permission card (Phases 2–3): unchanged component, now reachable from `gemini` and `copilot` under `ask` presets.
+
+## 📝 Edge Cases & Failure Scenarios
+
+| Scenario | Behavior |
+|---|---|
+| `config.toml` unreadable or malformed | `declaredProviders = []`; codex behaves exactly as today (bare ids, configured provider). |
+| Explicit `azure/x` but `azure` not declared | `ModelIdentityError` before spawn, with the message naming the missing stanza and the docs link. |
+| Declared provider's `env_key` unset | Settings hint beforehand; at run time codex's auth error surfaces as `provider-auth-required` for codex with a cezar-authored hint (no vendor text). |
+| Resume of a codex thread started on another provider | The recorded provider is passed again; if that provider is no longer declared, Continue starts a fresh thread (the #974 "continue without a session" path) with a `note`. |
+| Gemini individual with Google login only | Detection says `unknown` with the API-key hint; a live `UNSUPPORTED_CLIENT` becomes `provider-auth-required`. The run never hangs. |
+| Gemini exit 41 (auth) / 52 (config) / 55 (untrusted workspace) | `provider-auth-required` / `error` with a cezar-authored hint; 55 should not occur because the runner sets `GEMINI_CLI_TRUST_WORKSPACE=true`. |
+| `gemini --acp` unusable on the installed version | Per-turn `-p … --resume` fallback; non-`auto` permission presets refused at start (headless `ask_user` = deny). |
+| ACP child (either runner) dies mid-turn | Pending prompt rejects → `turn.completed{error}` + `error`; the next message respawns and `session/load`s if supported, otherwise a fresh session with a `note`. |
+| ACP permission request while the run is autonomous with a non-`auto` preset | Parks `waiting` with the existing autonomous warning (permission-modes spec). The wake source is the user's answer. |
+| Malformed or unknown frames (either runner) | Skipped; unknown `session/update` kinds yield no events (mapper robustness contract). |
+| `CEZ_DRY_RUN=1` | Bundled mocks; no network, no login. |
+
+## 📝 Risks & Impact Review
+
+- **Merge collision with Cursor (#807) and #925 (U9).** Both edit `agent-env.ts`, `agent-runner.ts`, `ui-events.ts` and
+  the union sites Phase 0 rewrites. If Phase 0 lands first, each rebases once and its union-site edits collapse to one
+  line. If #807 lands first, Phase 0 absorbs `cursor` into the tuple instead, with no design change. This is a direction
+  call, not a defect.
+- **Older cezar reading a newer `runs.json`** (§3). A downgrade after running a `gemini`/`copilot` task drops the whole
+  array on the old version's `safeParse`. This was true for `pi` too. Mitigation: call it out in the CHANGELOG entry
+  of Phases 2 and 3; widen-the-read precedent unchanged.
+- **Vendor churn.** Gemini's flags (`--yolo` → `--approval-mode`), auth policy, and ACP maturity in Copilot all moved
+  in 2026. Every runner phase starts with a verification Step against the installed CLI, and fixtures cite the version.
+- **Credential widening.** Phase 1 forwards named variables the user's own codex config names; Phases 2–3 add
+  backend-specific prefixes only. No runner gains another runner's credentials. The Vertex unlock for `gemini` follows
+  the existing toggle pattern, keyed on Gemini's own variable.
+- **Contract-package move (Phase 0).** `RUNNER_IDS` becomes a contract value the service imports at runtime. It rides
+  the existing `inline-contract.mjs` path, and `npm run test:package` proves the tarball still installs.
+- **Rollback.** Phases 0 and 1 revert cleanly (no persisted state). Reverting Phase 2 or 3 after use strands records
+  with the removed runner id. Revert with a `storedRunnerSchema` read-widening (fold to `claude`, the #547 precedent)
+  rather than a plain enum narrowing.
+- **Out of scope:** Antigravity CLI runner (named follow-up), Grok Option B, Kimi/GLM (#510/#511), routing through
+  OpenCode, writing vendor config, storing provider credentials under `.ai/cezar/`.
+
+## 📋 Phasing
+
+| Phase | PR | Depends on | Independently useful because |
+|---|---|---|---|
+| 0 — seam de-duplication | 1 | — | every future runner (incl. #807) is cheaper; unknown ids stop silently becoming Claude |
+| 1 — codex declared providers | 2 | 0 (uses `perRunner` for the config answer) | Azure and xAI on codex per task, with truthful records |
+| 2 — `gemini` runner + shared ACP layer | 3 | 0 | Gemini API-key / Vertex / Workspace users |
+| 3 — `copilot` runner | 4 | 0, and the ACP layer | Copilot subscribers |
+
+Phases 1, 2 and 3 are independent of each other. If Phase 3 is picked up before Phase 2, it carries Steps 2.2–2.3
+(the ACP client and mapper) instead; the layer is written once, by whichever lands first.
+
+## 📋 Implementation Plan
+
+Every Step leaves `npm run typecheck && npm test && npm run test:unit` green. Every Phase ends with the full gate
+(AGENTS.md § Validation), including `npm run build && npm run test:package`.
+
+### Phase 0 — seam de-duplication
+
+1. Add `packages/contract/src/runners.ts` (`RUNNER_IDS`, `runnerSchema`, `Runner`, `perRunner`). Point
+   `health.ts` at it; test `perRunner` against the old literal (accept/reject table).
+2. Re-export from `core/agent-runner.ts`; `PROVIDER_IDS = RUNNER_IDS`; `UiBackend = Runner` in both `ui-events.ts`.
+   Type-exactness test green.
+3. Replace every per-runner `z.object` literal (contract `workspace.ts`, `agent-profiles.ts`, `config.ts`,
+   `workspace/config.ts`, `agent-accounts.ts`, `server.ts` bodies) with `perRunner(…)`. `contract-parity*`,
+   `route-parity`, `typed-bodies` green.
+4. Exhaustive `createRunner`, `resumeCommand`, open-in-app tables; tests pin "unknown id is a type error" (a
+   `@ts-expect-error` case) and today's outputs for every current id.
+5. Cockpit literal sites → `RUNNER_IDS` / `runnerSchema`; web unit tests for order-preserving filters.
+6. `runner-union.test.ts` guard. Prove it red by reintroducing one literal list (`git stash push -- <file>` recipe,
+   AGENTS.md), then green. Update `AGENT_PROTOCOL.md` §9 step 2/8 to say "add the id to `RUNNER_IDS` in
+   `packages/contract/src/runners.ts`; typecheck and `runner-union.test.ts` list the rest".
+
+### Phase 1 — codex declared providers (#583, #584)
+
+1. Verify end to end with the installed codex (≥ 0.154, where `thread/start` / `thread/resume` carry `modelProvider`):
+   an Azure v1 endpoint and `https://api.x.ai/v1` with `wire_api = "responses"`, deployment-name-as-model, and the
+   env-key vs Entra (`env_http_headers`) variants. Record the minimum codex version in the runner. Settles U5: if xAI
+   has no Responses API, #584 is documented as unsupported and left open.
+2. `model-settings/codex.ts` → `declaredProviders` (fixture `config.toml` files: Azure stanza, xAI stanza, malformed,
+   project-scope override).
+3. `resolveModelIdentity` accepts `declaredProviders`. Unit table: declared/undeclared × default/foreign × bare/explicit;
+   the #405 regression test ("foreign provider never persisted unless served") stays and is proven red without the
+   runner override.
+4. `AgentRunSpec.modelProvider` wired at **both** `ActiveRun` construction sites and all three
+   `configuredModelProvider` call sites (`run.ts:3594,3776,4406`); the codex runner passes the override; the runner
+   test asserts `modelProvider` on the `thread/start` and `thread/resume` payloads.
+5. `buildChildEnv` `extraNames` from the provider's `env_key` / `env_http_headers`. Tests cover: `XAI_API_KEY`
+   forwarded only when an xAI provider serves the run; an invalid name is ignored; the claude/opencode/pi envs are
+   unchanged.
+6. Contract + route: `providers` on the config answer; the cockpit prefix chips and missing-key hint; web tests.
+7. `docs/providers.md` (Azure OpenAI / Foundry and xAI stanzas); BACKWARD_COMPATIBILITY.md §2 line; README pointer.
+
+### Phase 2 — `gemini` runner + shared ACP layer (#581)
+
+1. Verify against Gemini CLI ≥ 0.60: `--acp` `initialize` capabilities, `session/load`, cancel, `setSessionMode`
+   values, the usage `_meta` shape, whether a `plan` update or only the `write_todos` tool carries the plan, the
+   Vertex selector variable, and the auth-failure shape for a Google-login-only account. Capture real ACP transcripts
+   (API-key account, redacted) as the fixture source, with the version in each fixture header.
+2. `core/acp-client.ts` + tests against a scripted NDJSON peer (request/response, notifications, inbound requests,
+   malformed lines, child exit mid-request).
+3. `core/acp-ui-mapper.ts` + `gemini-ui-mapper.ts` dialect; `__fixtures__/gemini/` covering every parity row (with the
+   documented nesting substitute) + malformed and unknown-kind tests.
+4. `gemini-acp-runner.ts` (session lifecycle, cancel, respawn + `session/load`, timeout, env, trust variable) +
+   `scripts/mock-gemini-acp.mjs`; runner tests on the mock. Permission mapping: `auto` auto-answer; `ask` →
+   `permission.requested` / `permission.resolved`; a test that an unanswered request parks `waiting` and the answer
+   resumes the turn.
+5. `'gemini'` in `RUNNER_IDS`; factory; `probeGemini`; provider-auth descriptor with the API-key hint;
+   `BACKEND_ALLOW_PREFIXES` + Vertex toggle; `CEZ_GEMINI_BIN` in `.env.example` + `docs/reference.md`.
+6. Model settings, `BACKEND_MODEL_MAP`, presets, catalog entry, `resumeCommand`, open-in-app, `PROFILE_ENV_VAR = null`;
+   `ui-parity.test.ts` `BACKENDS` row; `AGENT_PROTOCOL.md` §4 gains an ACP column.
+7. Cockpit: runner pill, Settings → Agents row with the auth hint; e2e dry-run smoke (a task on `gemini` reaches
+   review, a follow-up resumes it). An opt-in real-CLI smoke test is skipped without `GEMINI_API_KEY`.
+
+### Phase 3 — `copilot` runner (#582)
+
+1. Verify against `@github/copilot` ≥ 1.0.86: `--acp --stdio`, `initialize` capabilities (`loadSession`, image
+   prompts), model selection, tool-filter flags, usage reporting, token precedence, the auth-error shape. Capture
+   fixtures.
+2. `copilot-ui-mapper.ts` dialect + `__fixtures__/copilot/` covering every parity row.
+3. `copilot-acp-runner.ts` + `scripts/mock-copilot-acp.mjs`; follow-ups, cancel, resume via `session/load`; permission
+   mapping through tool filters + the shared request handling.
+4. `'copilot'` in `RUNNER_IDS` and the rest of §9 (detection, auth, env, `CEZ_COPILOT_BIN`, presets, catalog,
+   resume, open-in-app, `PROFILE_ENV_VAR = null`, parity row, cockpit rows, dry-run e2e, opt-in real smoke).
