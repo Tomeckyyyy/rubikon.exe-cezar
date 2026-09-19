@@ -117,6 +117,33 @@ describe('useRunEvents — subscription', () => {
     }
   })
 
+  it('an explicit `projectId` wins over the ambient scope (Mission Control, spec 2026-09-18)', () => {
+    // The boot/ambient scope names a DIFFERENT project than the one this call is explicitly
+    // about — exactly the global-route scenario `projectId` exists to fix.
+    setApiScope('boot-project')
+    try {
+      renderHook(() => useRunEvents('run-1', { projectId: 'other-project' }))
+      expect(FakeEventSource.last.url).toBe('/api/v1/p/other-project/runs/run-1/events')
+    } finally {
+      setApiScope(null)
+    }
+  })
+
+  it('with no ambient scope, an explicit `projectId` still scopes the URL', () => {
+    renderHook(() => useRunEvents('run-1', { projectId: 'proj-b' }))
+    expect(FakeEventSource.last.url).toBe('/api/v1/p/proj-b/runs/run-1/events')
+  })
+
+  it('reopens the socket when `projectId` changes, like a scope change', () => {
+    const { rerender } = renderHook(({ projectId }) => useRunEvents('run-1', { projectId }), {
+      initialProps: { projectId: 'proj-a' },
+    })
+    expect(FakeEventSource.instances).toHaveLength(1)
+    rerender({ projectId: 'proj-b' })
+    expect(FakeEventSource.instances).toHaveLength(2)
+    expect(FakeEventSource.last.url).toBe('/api/v1/p/proj-b/runs/run-1/events')
+  })
+
   it('collects BOTH wire vocabularies into one ordered list — v1 `run-event` and v2 `ui-event`', async () => {
     const { result } = renderHook(() => useRunEvents('run-1'))
     const source = FakeEventSource.last

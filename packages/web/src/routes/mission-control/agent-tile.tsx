@@ -21,14 +21,7 @@ import { cn } from '@/lib/utils'
  * in the graph and a full tile in the grid are the same component at two sizes, not two
  * components kept in sync by hand.
  */
-export function AgentTile({
-  run,
-  project,
-  subtaskCount,
-  thumbnail,
-  compact = false,
-  className,
-}: {
+export interface AgentTileProps {
   run: RunIndexEntry
   /** The joined registry entry, when the caller has the registry loaded — absent renders the
    *  bare project id rather than blocking the tile on a second fetch. */
@@ -41,7 +34,15 @@ export function AgentTile({
   /** The Swarm Graph's custom node uses the same tile at a smaller footprint. */
   compact?: boolean
   className?: string
-}) {
+}
+
+/** `ref` forwards to the rendered `<a>` — `use-visible-run-events.ts`'s IntersectionObserver
+ *  needs the real DOM node to know when a tile scrolls into view. React Router's `Link` already
+ *  forwards its own ref to the anchor, so this is a plain pass-through, not a second mechanism. */
+export const AgentTile = React.forwardRef<HTMLAnchorElement, AgentTileProps>(function AgentTile(
+  { run, project, subtaskCount, thumbnail, compact = false, className },
+  ref,
+) {
   const paint = tileStatusPaint(run)
   const title = runTitle(run)
   const cost = formatCost(run.costUsd)
@@ -49,6 +50,7 @@ export function AgentTile({
 
   return (
     <Link
+      ref={ref}
       to={to}
       data-slot="agent-tile"
       data-run-id={run.id}
@@ -112,4 +114,4 @@ export function AgentTile({
       ) : null}
     </Link>
   )
-}
+})

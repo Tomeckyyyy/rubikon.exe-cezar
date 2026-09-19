@@ -8,6 +8,7 @@ import { splitActiveRuns, subtaskCounts } from '@/lib/mission-control'
 import { cn } from '@/lib/utils'
 
 import { AgentTile } from './agent-tile'
+import { useVisibleRunEvents } from './use-visible-run-events'
 
 /**
  * The Grid/Radar view (spec 2026-09-18-mission-control, "UI/UX → Grid/Radar"): a responsive tile
@@ -20,13 +21,9 @@ import { AgentTile } from './agent-tile'
 export function MissionControlGrid({
   runs,
   projects,
-  thumbnails,
 }: {
   runs: readonly RunIndexEntry[]
   projects: readonly ProjectListEntry[]
-  /** Phase 2: the last-tool-call thumbnail per visible, running run id. Absent (or an empty map)
-   *  is a normal, complete state — no thumbnail is ever required to render a tile. */
-  thumbnails?: ReadonlyMap<string, string>
 }) {
   const byId = React.useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
   const { active, finished } = React.useMemo(() => splitActiveRuns(runs), [runs])
@@ -48,7 +45,10 @@ export function MissionControlGrid({
   return (
     <div data-slot="mission-control-grid" className="flex flex-col gap-4">
       <section data-slot="mission-control-active" aria-label="Active runs">
-        <Tiles runs={active} byId={byId} counts={counts} thumbnails={thumbnails} />
+        {/* Only ACTIVE tiles ever observe their own visibility (Phase 2): a finished run is
+            never `running`, so `useVisibleRunEvents` on one would just be an idle
+            IntersectionObserver paying rent for nothing. */}
+        <Tiles runs={active} byId={byId} counts={counts} observeVisibility />
       </section>
 
       {finished.length > 0 ? (
@@ -74,13 +74,13 @@ function Tiles({
   runs,
   byId,
   counts,
-  thumbnails,
+  observeVisibility = false,
   className,
 }: {
   runs: readonly RunIndexEntry[]
   byId: ReadonlyMap<string, ProjectListEntry>
   counts: ReadonlyMap<string, number>
-  thumbnails?: ReadonlyMap<string, string>
+  observeVisibility?: boolean
   className?: string
 }) {
   return (
@@ -88,15 +88,50 @@ function Tiles({
       data-slot="mission-control-tiles"
       className={cn('grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3', className)}
     >
-      {runs.map((run) => (
-        <AgentTile
-          key={`${run.projectId}/${run.id}`}
-          run={run}
-          project={byId.get(run.projectId)}
-          subtaskCount={counts.get(run.id)}
-          thumbnail={thumbnails?.get(run.id)}
-        />
-      ))}
+      {runs.map((run) =>
+        observeVisibility ? (
+          <ObservedAgentTile
+            key={`${run.projectId}/${run.id}`}
+            run={run}
+            project={byId.get(run.projectId)}
+            subtaskCount={counts.get(run.id)}
+          />
+        ) : (
+          <AgentTile
+            key={`${run.projectId}/${run.id}`}
+            run={run}
+            project={byId.get(run.projectId)}
+            subtaskCount={counts.get(run.id)}
+          />
+        ),
+      )}
     </div>
+  )
+}
+
+/**
+ * One active tile, wired to its own visibility-conditional per-run stream (Phase 2). Kept as its
+ * own component rather than inlined in `Tiles`' map: `useVisibleRunEvents` is a HOOK, and calling
+ * one conditionally per array element is exactly the "hooks in a loop" mistake React's rules
+ * exist to catch — a separate component per row is what makes the per-row subscription legal.
+ */
+function ObservedAgentTile({
+  run,
+  project,
+  subtaskCount,
+}: {
+  run: RunIndexEntry
+  project?: ProjectListEntry
+  subtaskCount?: number
+}) {
+  const { setNode, toolCall } = useVisibleRunEvents(run)
+  return (
+    <AgentTile
+      ref={setNode}
+      run={run}
+      project={project}
+      subtaskCount={subtaskCount}
+      thumbnail={toolCall}
+    />
   )
 }

@@ -1,4 +1,4 @@
-import type { RunIndexEntry, RunStatus } from '@open-mercato/cezar-api-client'
+import type { RunEvent, RunIndexEntry, RunStatus } from '@open-mercato/cezar-api-client'
 
 import { buildTaskTree, flattenTaskTree } from '@/lib/task-tree'
 import type { StatusDotTone } from '@/components/status-dot'
@@ -80,4 +80,49 @@ export function tileStatusPaint(run: Pick<RunIndexEntry, 'status'>): TileStatusP
 export function subtaskCounts(runs: readonly RunIndexEntry[]): Map<string, number> {
   const tree = flattenTaskTree(buildTaskTree(runs))
   return new Map(tree.map((node) => [node.run.id, node.childCount]))
+}
+
+/** The shape of a protocol-v2 tool item this module reads — deliberately narrow (`title` only):
+ *  the full `UiToolItem` (`packages/cezar/src/core/ui-events.ts`) is server-only, and the
+ *  thumbnail wants exactly the one field the server already computed once
+ *  (`toolDisplay()`, e.g. "Read src/foo.ts"), never a second title-formatting rule on the client. */
+interface WireToolItem {
+  kind: 'tool'
+  title: string
+}
+
+function isWireToolItem(value: unknown): value is WireToolItem {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === 'tool' &&
+    typeof (value as { title?: unknown }).title === 'string'
+  )
+}
+
+/** protocol-v2 event types that carry a fresh `UiItem` snapshot — the ones worth scanning for a
+ *  tool call. `item.delta` never does (it carries `itemId`/a raw string field, not an item). */
+const ITEM_SNAPSHOT_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'item.started',
+  'item.updated',
+  'item.completed',
+])
+
+/**
+ * The most recent tool call's display title out of a per-run event stream — Mission Control's
+ * live "🔧 Read src/foo.ts" tile thumbnail (spec 2026-09-18-mission-control, Phase 2).
+ *
+ * Scans from the END: `useRunEvents` returns every frame seen so far in arrival order, and only
+ * the LATEST tool item is ever shown — a tile is a glance, not a transcript. Returns `undefined`
+ * when the stream has produced nothing yet, which is a normal, complete state (Phase 1's tile
+ * renders identically with no thumbnail at all).
+ */
+export function lastToolCallTitle(events: readonly RunEvent[]): string | undefined {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]!
+    if (!ITEM_SNAPSHOT_EVENT_TYPES.has(event.type)) continue
+    const item = (event as { item?: unknown }).item
+    if (isWireToolItem(item)) return item.title
+  }
+  return undefined
 }
