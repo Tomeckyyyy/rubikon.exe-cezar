@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { AUTOMATIONS_PROMPT } from '../automations/prompts.ts';
 import { HANDOFF_INSTRUCTIONS, HANDOFF_ONLY_INSTRUCTIONS } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
@@ -534,6 +534,13 @@ describe('systemPrompt end-to-end (dry run)', () => {
  * off.
  */
 describe('the global follow-up gate (dry run)', () => {
+  beforeEach(() => {
+    // This describe covers follow-ups only; keep the default-on automation capability
+    // from changing the expected base prompt between describe blocks.
+    process.env.CEZ_AUTOMATIONS = '0';
+    delete process.env.CEZ_API_URL;
+  });
+
   const CONFIG_PROMPT = 'CONFIG-DEFAULT: always write tests first.';
   let repoRoot: string;
   let argsFile: string;
