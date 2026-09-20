@@ -7,6 +7,7 @@ import { isUnread } from '@/lib/read-state'
 import {
   cliTargetResumes,
   finishTitle,
+  handoffBlockedReason,
   isRunActive,
   lastSessionId,
   queuePosition,
@@ -51,13 +52,13 @@ describe('runActionFlags — the visibility matrix, all 7 statuses × archived',
   // `finishedAt` — a record with no finish instant can never wear the unread marker, whatever
   // its status says. The flag's real matrix is the FINISHED one in its own describe below.
   const matrix: Array<{ status: RunStatus; expected: Omit<ReturnType<typeof runActionFlags>, 'notes'> }> = [
-    { status: 'queued', expected: { finish: false, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false } },
-    { status: 'running', expected: { finish: false, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false } },
-    { status: 'waiting', expected: { finish: true, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false } },
-    { status: 'review', expected: { finish: true, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
-    { status: 'done', expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
-    { status: 'failed', expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
-    { status: 'cancelled', expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true } },
+    { status: 'queued', expected: { finish: false, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false, handoff: false } },
+    { status: 'running', expected: { finish: false, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false, handoff: false } },
+    { status: 'waiting', expected: { finish: true, continueRun: false, terminal: false, archive: false, markUnread: false, pin: true, cancel: true, deleteRun: false, handoff: false } },
+    { status: 'review', expected: { finish: true, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true, handoff: true } },
+    { status: 'done', expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true, handoff: true } },
+    { status: 'failed', expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true, handoff: true } },
+    { status: 'cancelled', expected: { finish: false, continueRun: true, terminal: true, archive: true, markUnread: false, pin: true, cancel: false, deleteRun: true, handoff: true } },
   ]
 
   it.each(matrix)('$status (live)', ({ status, expected }) => {
@@ -82,6 +83,52 @@ describe('runActionFlags — the visibility matrix, all 7 statuses × archived',
     expect(flags.continueRun).toBe(false)
     expect(flags.terminal).toBe(false)
     expect(flags.deleteRun).toBe(true)
+  })
+})
+
+describe('runActionFlags.handoff + handoffBlockedReason — the status × mark matrix', () => {
+  // Cross-machine handoff (spec 2026-09-19-cross-machine-task-handoff): terminal runs only,
+  // and `out` marks are refused until unmarked. `in` is deliberately still offered — handing an
+  // imported task on is how it migrates further. Every cell also pins the reason, so a disabled
+  // item can never ship without its sentence.
+  const LIVE_REASON = 'a live task cannot be handed off — finish or stop it first'
+  const OUT_REASON = 'already handed off to another machine — unmark it to hand off again'
+  const TERMINAL: ReadonlySet<RunStatus> = new Set(['done', 'failed', 'cancelled', 'review'])
+  const marks: Array<{ name: string; handoff?: RunRecord['handoff'] }> = [
+    { name: 'never travelled', handoff: undefined },
+    { name: 'handed off (out)', handoff: { direction: 'out', at: '2026-09-19T12:00:00.000Z' } },
+    { name: 'imported (in)', handoff: { direction: 'in', at: '2026-09-19T12:00:00.000Z' } },
+  ]
+
+  for (const status of ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'] as RunStatus[]) {
+    for (const mark of marks) {
+      const expectedFlag = TERMINAL.has(status) && mark.handoff?.direction !== 'out'
+      const expectedReason = isRunActive(status)
+        ? LIVE_REASON
+        : mark.handoff?.direction === 'out'
+          ? OUT_REASON
+          : undefined
+      it(`${status} · ${mark.name} → handoff=${expectedFlag}`, () => {
+        const record = run(status, mark.handoff ? { handoff: mark.handoff } : {})
+        expect(runActionFlags(record).handoff).toBe(expectedFlag)
+        expect(handoffBlockedReason(record)).toBe(expectedReason)
+      })
+    }
+  }
+
+  it('a refusal always comes with a reason, and an offer never does', () => {
+    // The header renders the reason as the item's tooltip; an enabled item with no reason (or a
+    // disabled one without) would be the two halves of this decision disagreeing in public.
+    for (const status of ['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'] as RunStatus[]) {
+      for (const mark of marks) {
+        const record = run(status, mark.handoff ? { handoff: mark.handoff } : {})
+        expect(runActionFlags(record).handoff).toBe(handoffBlockedReason(record) === undefined)
+      }
+    }
+  })
+
+  it('an archived terminal run is still exportable — archiving says handled, not transferred', () => {
+    expect(runActionFlags(run('done', { archived: true })).handoff).toBe(true)
   })
 })
 

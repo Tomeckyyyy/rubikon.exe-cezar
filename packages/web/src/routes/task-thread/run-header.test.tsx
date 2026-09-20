@@ -335,6 +335,105 @@ describe('action bar visibility per status (the legacy rules, rendered)', () => 
   })
 })
 
+/**
+ * Cross-machine hand-off (spec 2026-09-19-cross-machine-task-handoff, Phase 3 step 10). The
+ * eligibility rule itself is table-tested in `run-actions.test.ts`; what these pin is that the
+ * header offers the action where the routes work, disables it with the reason where they do
+ * not apply, and drives the one endpoint.
+ */
+describe('hand off', () => {
+  const localHealth = () => jsonResponse({ capabilities: { localHandoff: true } })
+  const handoffButton = () => actionBar().findByRole<HTMLButtonElement>('button', { name: 'Hand off…' })
+
+  it('is absent in hosted mode — the export route 409s there', async () => {
+    stubFetch({
+      '/api/v1/health': () => jsonResponse({ capabilities: { localHandoff: false, tokenMetrics: false } }),
+    })
+    renderHeader(run('done'))
+    // Health has to have arrived before absence means anything: the token line disappearing is
+    // the proof, because it is read from the same payload.
+    const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+    await waitFor(() => expect(meta.textContent).not.toContain('IN 24.6k'))
+    expect(actionBar().queryByRole('button', { name: 'Hand off…' })).toBeNull()
+  })
+
+  it('is disabled with the reason on a live run', async () => {
+    stubFetch({ '/api/v1/health': localHealth })
+    renderHeader(run('running'))
+    const button = await handoffButton()
+    expect(button.disabled).toBe(true)
+    expect(button.title).toBe('a live task cannot be handed off — finish or stop it first')
+  })
+
+  it('is disabled with the unmark hint on a run already handed off', async () => {
+    stubFetch({ '/api/v1/health': localHealth })
+    renderHeader(run('done', { handoff: { direction: 'out', at: '2026-09-19T12:00:00.000Z' } }))
+    const button = await handoffButton()
+    expect(button.disabled).toBe(true)
+    expect(button.title).toBe('already handed off to another machine — unmark it to hand off again')
+  })
+
+  it('POSTs the export for an eligible run and toasts the bundle name', async () => {
+    const sent = stubFetch({
+      '/api/v1/health': localHealth,
+      '/api/v1/handoff/export': () =>
+        jsonResponse({
+          bundle: { name: 'r1.tgz', sizeBytes: 1_024, modifiedAt: '2026-09-19T12:00:00.000Z' },
+          runs: ['r1'],
+          branches: [],
+          notes: [],
+        }),
+    })
+    renderHeader(run('done'))
+    const button = await handoffButton()
+    expect(button.disabled).toBe(false)
+    const listCalls = () => sent.filter((r) => r.path === '/api/v1/runs').length
+    const before = listCalls()
+    fireEvent.click(button)
+
+    await waitFor(() => {
+      const request = sent.find((r) => r.path === '/api/v1/handoff/export')
+      expect(request?.method).toBe('POST')
+      expect(request?.body).toEqual({ runs: ['r1'] })
+    })
+    // The list/detail refetch is the authoritative half — the badge follows the server's answer.
+    await waitFor(() => expect(listCalls()).toBeGreaterThan(before))
+    expect(await screen.findByText(/bundle r1\.tgz is in the cezar cache/)).not.toBeNull()
+  })
+
+  it('shows a refusal verbatim as a danger toast', async () => {
+    stubFetch({
+      '/api/v1/health': localHealth,
+      '/api/v1/handoff/export': () => jsonResponse({ error: 'run r1 is active — cancel it first' }, 409),
+    })
+    renderHeader(run('done'))
+    fireEvent.click(await handoffButton())
+    expect(await screen.findByText('run r1 is active — cancel it first')).not.toBeNull()
+  })
+
+  it('wears the badge in the meta line when the record carries a handoff', async () => {
+    stubFetch()
+    renderHeader(run('done', { handoff: { direction: 'in', at: '2026-09-19T12:00:00.000Z', peer: 'vps' } }))
+    const meta = document.querySelector('[data-slot="run-meta"]') as HTMLElement
+    const badge = meta.querySelector<HTMLElement>('[data-slot="handoff-badge"]')
+    expect(badge?.textContent).toBe('imported')
+    expect(badge?.getAttribute('aria-label')).toContain('from vps')
+  })
+
+  it('is in the mobile kebab too, disabled with the same reason', async () => {
+    stubFetch({ '/api/v1/health': localHealth })
+    renderHeader(run('running'))
+    // Health first: the kebab is rendered from the same capability, so opening it before the
+    // payload lands would prove only that absence works.
+    await handoffButton()
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Run actions' }))
+    const menu = within(await screen.findByRole('menu'))
+    const item = menu.getByRole('menuitem', { name: 'Hand off…' })
+    expect(item.getAttribute('aria-disabled')).toBe('true')
+    expect(item.getAttribute('title')).toBe('a live task cannot be handed off — finish or stop it first')
+  })
+})
+
 describe('Mark unread (#775)', () => {
   const FINISHED_AT = '2026-07-14T13:00:00.000Z'
   const SEEN_AT = '2026-07-14T13:05:00.000Z'

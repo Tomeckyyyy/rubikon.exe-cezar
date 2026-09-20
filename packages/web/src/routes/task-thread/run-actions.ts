@@ -118,7 +118,15 @@ export interface RunActionFlags {
   cancel: boolean
   /** Remove the run, its transcript, worktree and branch. Terminal runs only. */
   deleteRun: boolean
+  /** Export this task to a bundle another machine can import (spec
+   *  2026-09-19-cross-machine-task-handoff). Terminal runs only, and never a run this machine
+   *  already handed off — the work belongs to the other machine until it is unmarked. */
+  handoff: boolean
 }
+
+/** The statuses `cez handoff export` accepts, mirrored so the cockpit's button and the server
+ *  refuse the same runs: a live or parked run holds a session that cannot travel. */
+const HANDOFF_STATUSES: ReadonlySet<RunStatus> = new Set(['done', 'failed', 'cancelled', 'review'])
 
 export function runActionFlags(run: RunRecord): RunActionFlags {
   const active = isRunActive(run.status)
@@ -133,7 +141,26 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
     markUnread: canBeUnread(run) && !isUnread(run),
     cancel: active,
     deleteRun: !active,
+    handoff: HANDOFF_STATUSES.has(run.status) && run.handoff?.direction !== 'out',
   }
+}
+
+/**
+ * Why "Hand off" is disabled, as the sentence the button shows — `undefined` exactly when the
+ * action is offered. The two refusals are different situations and are worded as such: a live
+ * task is a "not yet", a handed-off one is a "not this machine", and the second names the undo
+ * (`unmark`) because otherwise it reads as a dead end.
+ *
+ * Kept beside `runActionFlags` for the reason every rule in this module is: the flag and the
+ * reason are two halves of one decision, and a table test can pin them together so a status can
+ * never be disabled without saying why.
+ */
+export function handoffBlockedReason(run: RunRecord): string | undefined {
+  if (isRunActive(run.status)) return 'a live task cannot be handed off — finish or stop it first'
+  if (run.handoff?.direction === 'out') {
+    return 'already handed off to another machine — unmark it to hand off again'
+  }
+  return undefined
 }
 
 /**

@@ -26,6 +26,7 @@ import type { ProjectListEntry, RunIndexEntry, RunsIndexResponse } from '@open-m
 import { dispatchKindLabel, subtaskLabel, taskTreeRows, type TaskTreeInput } from '@/lib/task-tree'
 import { CenteredState } from '@/components/centered-state'
 import { FacetFilter, SegmentedControl, ToggleChip } from '@/components/facet-filter'
+import { HandoffBadge } from '@/components/handoff-badge'
 import { useListView } from '@/components/list-view'
 import { Pill } from '@/components/pill'
 import { ReferenceChip } from '@/components/reference-chip'
@@ -852,6 +853,9 @@ function TaskRow({
           >
             {runTitle(run)}
           </Link>
+          {/* Where this task physically lives when it crossed machines — the index row carries
+              `handoff` for exactly this badge (spec 2026-09-19-cross-machine-task-handoff). */}
+          {run.handoff ? <HandoffBadge handoff={run.handoff} className="shrink-0" /> : null}
           {/* What a DISPATCHED row is for — `review` or `implement`. Null on every root. */}
           {dispatchKindLabel(run) ? (
             <span

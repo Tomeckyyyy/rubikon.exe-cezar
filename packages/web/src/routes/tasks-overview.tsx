@@ -13,6 +13,7 @@ import {
   ListChecksIcon,
   LinkIcon,
   MemoryStickIcon,
+  PackageOpenIcon,
   PencilIcon,
   PlusIcon,
   ScaleIcon,
@@ -31,6 +32,8 @@ import { CenteredState } from '@/components/centered-state'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { DirectionalUsage } from '@/components/directional-usage'
 import { TitleEditInput, useTitleEditor } from '@/components/editable-title'
+import { HandoffBadge } from '@/components/handoff-badge'
+import { HandoffImportDialog } from '@/components/handoff-import-dialog'
 import { useListView } from '@/components/list-view'
 import { Pill } from '@/components/pill'
 import { PinToggle } from '@/components/pin-toggle'
@@ -90,6 +93,7 @@ export function TasksOverview({
   onMarkAllRead,
   onRename,
   onTogglePin,
+  onImportBundle,
   now = Date.now(),
   showTokens = true,
   showCost = true,
@@ -112,6 +116,9 @@ export function TasksOverview({
    *  for every surface at once — so the row's own control is also the only thing on this page
    *  that explains why one is up there. */
   onTogglePin?: (run: RunRecord, pinned: boolean) => void
+  /** Opens the import-bundle dialog. Absent when the host cannot import — hosted mode has no
+   *  handoff routes, so the page-level button disappears rather than 409ing on click. */
+  onImportBundle?: () => void
   /** Injected so the ages are not racing the clock in tests. */
   now?: number
   /** Presentation capability; defaults visible for older health responses and direct renders. */
@@ -187,6 +194,20 @@ export function TasksOverview({
           >
             <ArchiveIcon className="size-3.5" aria-hidden="true" />
             Archive finished
+          </Button>
+        ) : null}
+        {/* A page-level action like the broom above, and not count-gated: the shelf may hold a
+            bundle for a project with no tasks here yet. */}
+        {onImportBundle ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-slot="import-handoff"
+            onClick={onImportBundle}
+          >
+            <PackageOpenIcon className="size-3.5" aria-hidden="true" />
+            Import a bundle
           </Button>
         ) : null}
         <div className="relative w-60">
@@ -802,6 +823,9 @@ function TitleCell({
       >
         {title}
       </Link>
+      {/* Where this task physically lives when it crossed machines — beside the title, because
+          the row has no column for it and it belongs to the same glance as the name. */}
+      {run.handoff ? <HandoffBadge handoff={run.handoff} className="shrink-0" /> : null}
       {/* What a DISPATCHED row is for — `review` or `implement` — so a tester can tell a child
           from a task a person typed without opening it. Null on every root. */}
       {dispatchKindLabel(run) ? (
@@ -966,6 +990,8 @@ function TaskCard({
         >
           {runTitle(run)}
         </Link>
+        {/* Same badge as the table's Task cell — a card is the same row at phone width. */}
+        {run.handoff ? <HandoffBadge handoff={run.handoff} className="mt-px shrink-0" /> : null}
         {/* Same kind chip as the table's Task cell — what this dispatched card is for. */}
         {dispatchKindLabel(run) ? (
           <span
@@ -1106,6 +1132,11 @@ export function TasksOverviewRoute() {
   const pin = usePinRun()
   const now = useNow(30_000)
   const taskTableColumns = useTaskTableColumns()
+  // Cross-machine handoff (spec 2026-09-19-cross-machine-task-handoff): the import dialog is
+  // mounted only on a local machine — hosted mode has no handoff routes — and stays inert while
+  // closed, so `localHandoff` gates both the button and the mount.
+  const localHandoff = health.data?.capabilities?.localHandoff === true
+  const [importOpen, setImportOpen] = React.useState(false)
   // Chip statuses are hydrated HERE rather than inside `TasksOverview`, which is a pure
   // presentational component rendered directly (and without a query client) by its tests. The
   // provider wraps it instead, so the chips deep in the table and the cards read their status
@@ -1125,27 +1156,31 @@ export function TasksOverviewRoute() {
   )
 
   return (
-    <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
-      <TasksOverview
-        runs={runs.data}
-        view={view}
-        onViewChange={setView}
-        onArchiveFinished={() => archive.mutate()}
-        onMarkAllRead={() => markAllRead.mutate()}
-        onRename={(id, title) => rename.mutate({ id, title })}
-        onTogglePin={(run, pinned) =>
-          pin.mutate(
-            { id: run.id, pinned },
-            { onError: (error: Error) => toast(error.message, { tone: 'danger' }) },
-          )
-        }
-        now={now}
-        showTokens={metricVisibility.tokens}
-        showCost={metricVisibility.cost}
-        expandedColumns={taskTableColumns.expandedColumns}
-        onToggleColumn={taskTableColumns.toggleColumn}
-        columnsPending={taskTableColumns.isPending}
-      />
-    </ReferenceStatusProvider>
+    <>
+      <ReferenceStatusProvider projectId={projectId} requests={referenceRequests}>
+        <TasksOverview
+          runs={runs.data}
+          view={view}
+          onViewChange={setView}
+          onArchiveFinished={() => archive.mutate()}
+          onMarkAllRead={() => markAllRead.mutate()}
+          onRename={(id, title) => rename.mutate({ id, title })}
+          onTogglePin={(run, pinned) =>
+            pin.mutate(
+              { id: run.id, pinned },
+              { onError: (error: Error) => toast(error.message, { tone: 'danger' }) },
+            )
+          }
+          onImportBundle={localHandoff ? () => setImportOpen(true) : undefined}
+          now={now}
+          showTokens={metricVisibility.tokens}
+          showCost={metricVisibility.cost}
+          expandedColumns={taskTableColumns.expandedColumns}
+          onToggleColumn={taskTableColumns.toggleColumn}
+          columnsPending={taskTableColumns.isPending}
+        />
+      </ReferenceStatusProvider>
+      {localHandoff ? <HandoffImportDialog open={importOpen} onOpenChange={setImportOpen} /> : null}
+    </>
   )
 }
