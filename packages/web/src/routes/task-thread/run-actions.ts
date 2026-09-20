@@ -133,7 +133,11 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
   const hasSession = lastSessionId(run) !== undefined
   return {
     finish: run.status === 'waiting' || run.status === 'review',
-    continueRun: !active && hasSession,
+    // An IMPORTED task has no session id at all — import clears them — and is still continuable:
+    // the server opens a fresh session seeded by its handoff journal. Without this clause the
+    // one button that makes an imported task useful would be hidden, and the feature would only
+    // exist through the API.
+    continueRun: !active && (hasSession || run.handoff?.direction === 'in'),
     terminal: !active && hasSession,
     notes: true,
     archive: !active,

@@ -84,6 +84,25 @@ describe('runActionFlags — the visibility matrix, all 7 statuses × archived',
     expect(flags.terminal).toBe(false)
     expect(flags.deleteRun).toBe(true)
   })
+
+  it('an IMPORTED task offers Continue without a session — the server opens a fresh journal-seeded one', () => {
+    // Import clears every step's sessionId (they only mean something inside the config dir that
+    // created them), so a `hasSession`-only rule hid the one button that makes an imported task
+    // useful. Terminal stays off: there is no native session to hand to a terminal.
+    const record = run('failed', {
+      steps: [step()],
+      handoff: { direction: 'in', at: '2026-09-19T12:00:00.000Z' },
+    })
+    expect(runActionFlags(record).continueRun).toBe(true)
+    expect(runActionFlags(record).terminal).toBe(false)
+    expect(lastSessionId(record)).toBeUndefined()
+
+    // A handed-off (out) run keeps its session in the record, so it still offers the button —
+    // the click reaches the server's refusal, which names `cez handoff unmark`. Hiding it would
+    // leave the user with no way to learn why Continue is unavailable.
+    const out = run('done', { handoff: { direction: 'out', at: '2026-09-19T12:00:00.000Z' } })
+    expect(runActionFlags(out).continueRun).toBe(true)
+  })
 })
 
 describe('runActionFlags.handoff + handoffBlockedReason — the status × mark matrix', () => {

@@ -203,5 +203,24 @@ describe('cross-machine handoff', () => {
     browser.waitForFunction(
       `document.querySelector('[data-slot="handoff-badge"][data-direction="in"]') !== null`,
     )
+
+    // Continue is offered even though import cleared the session id — and it really opens a
+    // fresh, journal-seeded session (a new `continue-1` step) rather than refusing.
+    browser.waitForFunction(`document.querySelector('[data-slot="continue-run"]') !== null`)
+    browser.click('[data-slot="continue-run"]')
+    browser.waitForFunction(
+      `document.querySelector('[data-slot="continue-run"]') === null || !document.querySelector('[data-slot="continue-run"]').disabled`,
+    )
+    const resumed = await (async () => {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const record = await getJson<{ status: string; steps: Array<{ id: string }> }>(
+          `${baseUrl}/api/v1/runs/${TASK_ID}`,
+        )
+        if (record.steps.some((step) => step.id === 'continue-1')) return record
+        await new Promise((r) => setTimeout(r, 250))
+      }
+      throw new Error('the imported task never opened its fresh continuation')
+    })()
+    expect(resumed.steps.some((step) => step.id === 'continue-1')).toBe(true)
   })
 })

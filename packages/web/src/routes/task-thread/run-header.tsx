@@ -287,6 +287,7 @@ function RunHeaderView({
               <Button
                 variant="outline"
                 size="sm"
+                data-slot="continue-run"
                 title={actions.continuation.reason ?? 'Reopen the session'}
                 disabled={actions.continueRun.isPending || !actions.continuation.canContinue}
                 onClick={() => actions.continueRun.mutate()}
