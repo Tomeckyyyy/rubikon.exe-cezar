@@ -74,6 +74,12 @@ describe('every mutating route carries a typed body into AppType', () => {
     Assert<HasTypedBody<'/api/v1/workspace/ui-state', '$put'>>,
     Assert<HasTypedBody<'/api/v1/workspace/skills-update/check', '$post'>>,
     Assert<HasTypedBody<'/api/v1/workspace/skills-update/apply', '$post'>>,
+    // Cross-machine handoff (spec 2026-09-19): a bundle name reaches the filesystem as a path
+    // segment, so its validation must be middleware — a handler-side check would leave the route
+    // typed as taking any string.
+    Assert<HasTypedBody<'/api/v1/handoff/export', '$post'>>,
+    Assert<HasTypedBody<'/api/v1/handoff/import', '$post'>>,
+    Assert<HasTypedBody<'/api/v1/handoff/unmark', '$post'>>,
   ];
 
   type WorkspaceUiStatePutBody = Schema['/api/v1/workspace/ui-state']['$put']['input']['json'];
@@ -118,6 +124,7 @@ describe('every mutating route carries a typed body into AppType', () => {
     Assert<HasTypedInput<'/api/v1/runs/:id/drafts/:surface/images', '$post', 'param'>>,
     Assert<HasTypedInput<'/api/v1/runs/:id/drafts/:surface/images/:imageId', '$get', 'param'>>,
     Assert<HasTypedInput<'/api/v1/runs/:id/drafts/:surface/images/:imageId', '$delete', 'param'>>,
+    Assert<HasTypedInput<'/api/v1/handoff/bundles/preview', '$get', 'query'>>,
   ];
 
   it('is enforced by tsc, not at runtime', () => {

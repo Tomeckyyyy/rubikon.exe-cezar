@@ -50,10 +50,15 @@ export interface ExportStore {
   ): unknown;
 }
 
+export interface ExportSelectionProblem {
+  message: string;
+  code: 'unknown-run' | 'not-terminal' | 'nothing-to-export';
+}
+
 export interface ExportSelection {
   selected: RunRecord[];
   /** Human-readable refusals (unknown/ambiguous ids, live statuses, nothing selected). */
-  problems: string[];
+  problems: ExportSelectionProblem[];
 }
 
 /**
@@ -77,7 +82,7 @@ export function selectExportableRuns(
   runs: readonly RunRecord[],
   opts: { runIds?: readonly string[]; all?: boolean },
 ): ExportSelection {
-  const problems: string[] = [];
+  const problems: ExportSelectionProblem[] = [];
   const selected: RunRecord[] = [];
   const taken = new Set<string>();
   const push = (run: RunRecord) => {
@@ -91,16 +96,16 @@ export function selectExportableRuns(
     for (const input of ids) {
       const matches = runs.filter((run) => run.id === input || run.id.startsWith(input));
       if (matches.length === 0) {
-        problems.push(`no task in this project matches "${input}"`);
+        problems.push({ message: `no task in this project matches "${input}"`, code: 'unknown-run' });
         continue;
       }
       if (matches.length > 1) {
-        problems.push(`"${input}" matches ${matches.length} tasks — use the full task id`);
+        problems.push({ message: `"${input}" matches ${matches.length} tasks — use the full task id`, code: 'unknown-run' });
         continue;
       }
       const run = matches[0]!;
       if (!isTerminalRunStatus(run.status)) {
-        problems.push(liveExportRefusal(run));
+        problems.push({ message: liveExportRefusal(run), code: 'not-terminal' });
         continue;
       }
       push(run);
@@ -108,14 +113,20 @@ export function selectExportableRuns(
     return { selected, problems };
   }
   if (!opts.all) {
-    problems.push('nothing selected — name a task id or pass --all to export every finished task');
+    problems.push({
+      message: 'nothing selected — name a task id or pass --all to export every finished task',
+      code: 'nothing-to-export',
+    });
     return { selected, problems };
   }
   for (const run of runs) {
     if (isTerminalRunStatus(run.status)) push(run);
   }
   if (selected.length === 0) {
-    problems.push('nothing to export — this project has no finished task (done, failed, cancelled, review)');
+    problems.push({
+      message: 'nothing to export — this project has no finished task (done, failed, cancelled, review)',
+      code: 'nothing-to-export',
+    });
   }
   return { selected, problems };
 }
@@ -175,9 +186,10 @@ export async function exportRuns(opts: ExportOptions): Promise<ExportResult> {
   const now = opts.now ?? (() => new Date().toISOString());
   const selection = selectExportableRuns(opts.store.listRuns(), { runIds: opts.runIds, all: opts.all });
   if (selection.problems.length > 0) {
-    const first = selection.problems[0]!;
-    const code = first.startsWith('nothing') ? 'nothing-to-export' : 'not-terminal';
-    throw new TransferError(selection.problems.join('\n'), code);
+    throw new TransferError(
+      selection.problems.map((problem) => problem.message).join('\n'),
+      selection.problems[0]!.code,
+    );
   }
   const at = now();
   const notes: string[] = [];

@@ -463,6 +463,46 @@ none of its own. [Details →](server-install/ubuntu-vps.md#the-box-already-has-
 See the **[Remote access overview](server-install/README.md)** for how it
 works and how to redeploy new versions.
 
+### Moving finished tasks between machines
+
+A task finished on your laptop can continue on the server (or the other way
+round). Only **terminal** tasks travel — `done`, `failed`, `cancelled`,
+`review` — and only what cezar owns: the run record, its transcript, its
+handoff journal and its `cez/*` branch. Vendor session files and credentials
+never move; Continue on the destination starts a **fresh session seeded by the
+task's handoff journal**, so continuity does not depend on which backend wrote
+the session.
+
+```bash
+# on the laptop, with its cockpit stopped (a running cockpit owns runs.json):
+npx cezar-cli handoff export --all          # → ~/.cache/cez/handoff/<project>-<stamp>.tgz
+npx cezar-cli handoff export <taskId>       # just one task
+npx cezar-cli handoff export --all --out -  # stream to stdout (logs go to stderr)
+
+# one command that exports, copies the bundle over ssh and prints the rest:
+npx cezar-cli handoff push --to deploy@vps.example.com --all
+
+# on the server, service stopped, project already registered (Add project / cez projects add):
+npx cezar-cli handoff import ~/.cache/cez/handoff/<name>.tgz --dry-run   # preview only
+npx cezar-cli handoff import <name>.tgz                                  # by cache name
+```
+
+The destination recreates each worktree from the bundled branch, re-inserts the
+runs with its OWN worktree paths, and marks them imported — nothing launches on
+boot, and no `autoResumeAt`/monitoring timer is re-armed from the source's stale
+state. Export marks the source tasks handed-off (Continue there refuses until
+`cez handoff unmark <id>|--all`), written only after the bundle is durably on
+disk. A branch that never reached the bundle still imports — the task simply
+has no worktree and no diff. Re-running an import is idempotent by task id; a
+branch that already exists locally at a different commit refuses instead of
+clobbering it.
+
+`cez handoff push` never stops or starts the remote service for you — it prints
+the exact `systemctl` commands and the remote `import` line to run. The same
+import is available in the cockpit (Tasks → **Import a bundle**, local mode
+only) with the identical preview before anything is committed. `cez handoff
+list` shows the bundles waiting in the cache.
+
 ---
 
 ## Configuration (optional)

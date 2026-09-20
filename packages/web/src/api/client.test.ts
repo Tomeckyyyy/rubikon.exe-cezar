@@ -29,9 +29,13 @@ import {
   getTodos,
   getUiState,
   getWorkflows,
+  exportHandoff,
+  importHandoffBundle,
+  listHandoffBundles,
   openRunInCli,
   patchRun,
   pickVariant,
+  previewHandoffBundle,
   putUiState,
   refreshSkills,
   removeTodo,
@@ -40,6 +44,7 @@ import {
   setProviderEnabled,
   startTodo,
   retryProviderAuth,
+  unmarkHandoff,
 } from './client'
 import { setApiScope } from '@open-mercato/cezar-api-client'
 
@@ -303,6 +308,42 @@ describe('request shapes', () => {
       path: '/api/v1/runs/run-1/messages',
       method: 'POST',
       body: { text: '', images: [{ mediaType: 'image/png', data: 'AAA' }] },
+    },
+    // Cross-machine handoff (spec 2026-09-19-cross-machine-task-handoff). Unscoped paths, like
+    // every other project-scoped call in this table — the `/p/default` segment is dropped when no
+    // scope is active (`unscoped`), and the scoped spelling is covered by the prefix test below.
+    {
+      name: 'listHandoffBundles',
+      call: () => listHandoffBundles(),
+      path: '/api/v1/handoff/bundles',
+      method: 'GET',
+    },
+    {
+      name: 'previewHandoffBundle',
+      call: () => previewHandoffBundle('cezar-20260919.tgz'),
+      path: '/api/v1/handoff/bundles/preview?name=cezar-20260919.tgz',
+      method: 'GET',
+    },
+    {
+      name: 'exportHandoff',
+      call: () => exportHandoff(['run-1']),
+      path: '/api/v1/handoff/export',
+      method: 'POST',
+      body: { runs: ['run-1'] },
+    },
+    {
+      name: 'importHandoffBundle',
+      call: () => importHandoffBundle('cezar-20260919.tgz'),
+      path: '/api/v1/handoff/import',
+      method: 'POST',
+      body: { name: 'cezar-20260919.tgz' },
+    },
+    {
+      name: 'unmarkHandoff',
+      call: () => unmarkHandoff(['run-1']),
+      path: '/api/v1/handoff/unmark',
+      method: 'POST',
+      body: { runs: ['run-1'] },
     },
   ]
 

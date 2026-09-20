@@ -45,6 +45,8 @@ import {
   getRunHandoff,
   getRuns,
   getRunsIndex,
+  importHandoffBundle,
+  listHandoffBundles,
   getImportableSkills,
   getImportableSkillsWhenReady,
   getSkills,
@@ -144,6 +146,14 @@ export const queryKeys = {
   },
   groups: {
     detail: (groupId: string) => [queryScope(), 'groups', groupId] as const,
+  },
+  /** Cross-machine handoff (spec 2026-09-19-cross-machine-task-handoff): the bundle shelf and
+   *  one bundle's import preview. */
+  handoff: {
+    get bundles() {
+      return [queryScope(), 'handoff', 'bundles'] as const
+    },
+    preview: (name: string) => [queryScope(), 'handoff', 'bundles', name, 'preview'] as const,
   },
   get todos() {
     return [queryScope(), 'todos'] as const
@@ -965,6 +975,24 @@ export function useRunHandoff(id: string | undefined, enabled = true) {
     queryKey: queryKeys.runs.handoff(id ?? ''),
     queryFn: ({ signal }) => getRunHandoff(id as string, { signal }),
     enabled: Boolean(id) && enabled,
+  })
+}
+
+/**
+ * Bundles waiting in the machine's handoff cache (spec 2026-09-19-cross-machine-task-handoff).
+ *
+ * `enabled` is the hosted-mode gate: the routes answer 409 off the loopback, so the import
+ * surface parks the query exactly as the inbox parks `useTodos` when its flag is off. Read once
+ * per visit to the surface (`staleTime` keeps a reopen instant); the import mutation invalidates
+ * it, which is the only thing that changes the shelf while a user is looking at it.
+ */
+export function useHandoffBundles(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.handoff.bundles,
+    queryFn: ({ signal }) => listHandoffBundles({ signal }),
+    enabled,
+    staleTime: 30_000,
+    retry: false,
   })
 }
 
