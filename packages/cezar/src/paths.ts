@@ -87,6 +87,29 @@ export function serverStatePath(instance: string = DEFAULT_SERVER_INSTANCE): str
 }
 
 /**
+ * The machine's cezar cache root — `~/.cache/cez`, where skills clones already live. Cached
+ * artifacts are rebuildable by definition (spec/AGENTS.md: "New state may be written, never
+ * required"), so nothing here is ever required for cezar to work.
+ *
+ * `CEZ_HOME` (the tests/containers pin) relocates the cache with the rest of the writable cezar
+ * state, so a pinned run never reaches into a real user's `~/.cache`. Without it the default is
+ * the machine-level `~/.cache/cez` — NOT `~/.cezar/cache`, which would move the documented home
+ * of the skills clones and handoff bundles for everyone.
+ */
+export function cezarCacheDir(env: NodeJS.ProcessEnv = process.env): string {
+  const pinned = env.CEZ_HOME?.trim();
+  return pinned ? join(pinned, 'cache') : join(homedir(), '.cache', 'cez');
+}
+
+/** Default home of exported handoff bundles (`cez handoff export`, `cez handoff push`). Outside
+ *  the repo on purpose, so no gitignored file ever lands in the user's `git status` — the
+ *  explicit exception AGENTS.md asks every new state file to state. `CEZ_HOME` pins it along
+ *  with the rest of the cache (see `cezarCacheDir`). */
+export function handoffBundleDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(cezarCacheDir(env), 'handoff');
+}
+
+/**
  * Per-user workspace config (spec 2026-07-20-multi-project-workspace): schema
  * version, global defaults, and the project registry — every repo cezar has
  * been booted in. Lives directly under `cezarHomeDir()`, so the `CEZ_HOME`

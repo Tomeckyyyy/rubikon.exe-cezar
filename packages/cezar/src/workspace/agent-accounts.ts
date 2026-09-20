@@ -1,4 +1,4 @@
-import { realpathSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { posix, resolve, win32 } from 'node:path';
 import { z } from 'zod';
@@ -205,6 +205,24 @@ export async function loadAgentAccounts(): Promise<AgentAccountStore> {
   }
   console.warn(`[cez] agent accounts ${path} is corrupt — ignoring it (every project falls back to its default account)`);
   return defaultAgentAccountStore();
+}
+
+/**
+ * Synchronous existence check for callers that cannot await — the Continue gate
+ * (`RunManager.continueRun`) is synchronous by design and one small JSON read is cheap on a path a
+ * human triggers. Deliberately does NOT run the legacy `config.json` import that
+ * `loadAgentAccounts` performs: that migration writes a file, and by the time anything reaches
+ * this path the cockpit's boot has long since run it. An absent or corrupt store answers `false`,
+ * which is only ever read as "this account is not known here" — the refusal wording says so.
+ */
+export function agentAccountExistsSync(id: string): boolean {
+  if (id === DEFAULT_AGENT_ACCOUNT_ID) return true;
+  try {
+    const parsed = storeSchema.safeParse(JSON.parse(readFileSync(agentAccountsPath(), 'utf8')));
+    return parsed.success && parsed.data.accounts.some((account) => account.id === id);
+  } catch {
+    return false;
+  }
 }
 
 /**

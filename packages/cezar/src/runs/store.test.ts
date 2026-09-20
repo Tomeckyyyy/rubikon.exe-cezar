@@ -1984,3 +1984,86 @@ describe('RunStore — pinned tasks (#935)', () => {
     expect(store.getRun('hand-pinned')?.pinned).toBe(true);
   });
 });
+
+/**
+ * `importRun` — the store half of the cross-machine handoff (spec
+ * `.ai/specs/2026-09-19-cross-machine-task-handoff.md`). The importer validates a record FIRST,
+ * because `runs.json` is `safeParse`d as one array: a malformed row would drop every run in the
+ * file on the next boot (BACKWARD_COMPATIBILITY §3).
+ */
+describe('RunStore — importRun (cross-machine handoff)', () => {
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'cez-store-import-'));
+  });
+
+  afterEach(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const importedRecord = (overrides: Partial<RunRecord> = {}): RunRecord => ({
+    id: 'imported-1',
+    title: 'handed over',
+    workflow: 'quick-task',
+    task: 'handed over',
+    status: 'done',
+    createdAt: '2026-09-19T10:00:00.000Z',
+    finishedAt: '2026-09-19T11:00:00.000Z',
+    tokensUsed: 0,
+    archived: false,
+    handoff: { direction: 'in', at: '2026-09-19T11:00:00.000Z' },
+    steps: [{ id: 'work', name: 'Work', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }],
+    ...overrides,
+  });
+
+  it('inserts a record, emits it, and persists handoff through runs.json', () => {
+    const store = RunStore.open(dataDir);
+    const seen: RunRecord[] = [];
+    store.on('run', (run: RunRecord) => seen.push(run));
+
+    const result = store.importRun(importedRecord());
+    expect(result.ok).toBe(true);
+    expect(store.getRun('imported-1')?.handoff).toEqual({ direction: 'in', at: '2026-09-19T11:00:00.000Z' });
+    expect(seen.map((run) => run.id)).toEqual(['imported-1']);
+
+    store.flush();
+    const persisted = JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8')) as RunRecord[];
+    expect(persisted.find((run) => run.id === 'imported-1')?.handoff?.direction).toBe('in');
+  });
+
+  it('replaces by id, so re-running an interrupted import is idempotent', () => {
+    const store = RunStore.open(dataDir);
+    store.importRun(importedRecord({ title: 'first pass' }));
+    store.importRun(importedRecord({ title: 'second pass' }));
+    expect(store.listRuns().filter((run) => run.id === 'imported-1')).toHaveLength(1);
+    expect(store.getRun('imported-1')?.title).toBe('second pass');
+  });
+
+  it('refuses a malformed record instead of poisoning the index', () => {
+    const store = RunStore.open(dataDir);
+    const good = store.importRun(importedRecord());
+    expect(good.ok).toBe(true);
+
+    // `status` is required by the schema; a record missing it must not enter the map.
+    const { status: _status, ...withoutStatus } = importedRecord({ id: 'bad-1' });
+    const bad = store.importRun(withoutStatus);
+    expect(bad.ok).toBe(false);
+    if (!bad.ok) expect(bad.error).toMatch(/malformed run record/);
+    expect(store.getRun('bad-1')).toBeUndefined();
+    expect(store.listRuns().map((run) => run.id)).toEqual(['imported-1']);
+    expect(store.importRun(null).ok).toBe(false);
+    expect(store.listRuns().map((run) => run.id)).toEqual(['imported-1']);
+  });
+
+  it('survives a reload: an imported record reads back with its normalized shape', () => {
+    const store = RunStore.open(dataDir);
+    store.importRun(importedRecord({ autoResumeAt: undefined }));
+    store.flush();
+
+    const reopened = RunStore.open(dataDir);
+    const run = reopened.getRun('imported-1');
+    expect(run?.handoff?.direction).toBe('in');
+    expect(run?.steps[0]?.sessionId).toBeUndefined();
+  });
+});

@@ -60,6 +60,11 @@ import type {
   GithubPrMergeStateResponse,
   GithubPrChangesData,
   GroupResponse,
+  HandoffBundlesResponse,
+  HandoffExportResponse,
+  HandoffImportPlan,
+  HandoffImportResponse,
+  HandoffUnmarkResponse,
   HealthResponse,
   AttachmentInput,
   LaunchKeyResponse,
@@ -1689,6 +1694,72 @@ export async function createRepoBranch(input: { name: string; from?: string }): 
       json: input,
     }),
     '/repo/branch',
+  )
+}
+
+// ---- cross-machine handoff (spec 2026-09-19-cross-machine-task-handoff) -----------------------
+
+/** Bundles waiting in the MACHINE's handoff cache (`~/.cache/cez/handoff/`) — the import
+ *  surface's shelf. Read through the scoped project because a bundle is imported into one
+ *  project, and the routes are local-machine-gated (409 in hosted mode) like the agent-config
+ *  writes. Metadata only: `previewHandoffBundle` is what reads a manifest. */
+export async function listHandoffBundles(opts?: ReadOptions): Promise<HandoffBundlesResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].handoff.bundles.$get(
+      { param: { projectId: queryScope() } },
+      init(opts),
+    ),
+    '/handoff/bundles',
+  )
+}
+
+/** Exactly what `cez handoff import --dry-run` prints: the plan an import would apply —
+ *  create/replace per task, the destination worktree paths, the branches to fetch, warnings. */
+export async function previewHandoffBundle(
+  name: string,
+  opts?: ReadOptions,
+): Promise<HandoffImportPlan> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].handoff.bundles.preview.$get(
+      { param: { projectId: queryScope() }, query: { name } },
+      init(opts),
+    ),
+    '/handoff/bundles/preview',
+  )
+}
+
+/** Export explicit tasks to a bundle. Refusals (a live task, an unknown id) reject with the
+ *  server's own message — the same text `cez handoff export` prints. */
+export async function exportHandoff(runs: string[]): Promise<HandoffExportResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].handoff.export.$post({
+      param: { projectId: queryScope() },
+      json: { runs },
+    }),
+    '/handoff/export',
+  )
+}
+
+/** Apply a bundle to this project: fetch its branches, reattach worktrees, upsert records.
+ *  Nothing launches — imported tasks land terminal and wait for a Continue. */
+export async function importHandoffBundle(name: string): Promise<HandoffImportResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].handoff.import.$post({
+      param: { projectId: queryScope() },
+      json: { name },
+    }),
+    '/handoff/import',
+  )
+}
+
+/** The undo for an accidental hand-off: clear the mark so this machine can continue the tasks. */
+export async function unmarkHandoff(runs: string[]): Promise<HandoffUnmarkResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].handoff.unmark.$post({
+      param: { projectId: queryScope() },
+      json: { runs },
+    }),
+    '/handoff/unmark',
   )
 }
 

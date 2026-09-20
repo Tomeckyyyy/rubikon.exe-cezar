@@ -137,6 +137,22 @@ describe('TasksOverview — the table', () => {
     expect(ids).toEqual(['rev1', 'run1', 'done1'])
   })
 
+  it('wears the handoff badge inline next to the title, in both layouts', () => {
+    // Cross-machine handoff (spec 2026-09-19-cross-machine-task-handoff): no new column — the
+    // badge belongs to the same glance as the name, on the table row and the phone card alike.
+    renderOverview({
+      runs: [
+        run({ id: 'out', handoff: { direction: 'out', at: '2026-09-19T12:00:00.000Z' } }),
+        run({ id: 'in', handoff: { direction: 'in', at: '2026-09-19T12:00:00.000Z', peer: 'vps' } }),
+        run({ id: 'plain' }),
+      ],
+    })
+    expect(tableRow('out')?.querySelector('[data-slot="handoff-badge"]')?.textContent).toBe('handed off')
+    expect(tableRow('in')?.querySelector('[data-slot="handoff-badge"]')?.textContent).toBe('imported')
+    expect(tableRow('plain')?.querySelector('[data-slot="handoff-badge"]')).toBeNull()
+    expect(card('out')?.querySelector('[data-slot="handoff-badge"]')?.textContent).toBe('handed off')
+  })
+
   it('says the run status through the attention pill', () => {
     renderOverview({
       runs: [
@@ -766,6 +782,19 @@ describe('TasksOverview — header', () => {
     expect(screen.queryByRole('button', { name: /Archive finished/ })).toBeNull()
   })
 
+  it('offers Import a bundle only when the host can hand off, and opens the surface on click', () => {
+    // Hosted mode: the host passes no callback (the route gates on `capabilities.localHandoff`),
+    // so the page-level action is absent rather than a button that 409s.
+    renderOverview({ runs: [run()] })
+    expect(screen.queryByRole('button', { name: /Import a bundle/ })).toBeNull()
+    cleanup()
+
+    const onImportBundle = vi.fn()
+    renderOverview({ runs: [run()], onImportBundle })
+    fireEvent.click(screen.getByRole('button', { name: /Import a bundle/ }))
+    expect(onImportBundle).toHaveBeenCalledTimes(1)
+  })
+
   // Read/unread (#unread-done-items). The rule itself is table-tested in lib/read-state.test.ts;
   // what these cover is the PAINT — that the table actually wears the marker the rule decides,
   // and that the sweep control is offered exactly when there is unread history to sweep.
@@ -1157,6 +1186,28 @@ describe('TasksOverviewRoute — wired to the app', () => {
       const listFetches = fetchMock.mock.calls.filter(([path]) => String(path) === '/api/v1/runs')
       expect(listFetches.length).toBeGreaterThan(1)
     })
+  })
+
+  it('shows Import a bundle on a local machine and opens the bundle shelf', async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input)
+      if (url === '/api/v1/health') return json({ capabilities: { localHandoff: true } })
+      if (url === '/api/v1/handoff/bundles') return json({ bundles: [] })
+      if (url === '/api/v1/runs') return json([])
+      return json({})
+    })
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <ListViewProvider>
+            <TasksOverviewRoute />
+          </ListViewProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /Import a bundle/ }))
+    expect(await screen.findByText('No bundles on this machine yet')).not.toBeNull()
   })
 
   it('PATCHes a table rename to /api/v1/runs/:id and refetches the authoritative list', async () => {

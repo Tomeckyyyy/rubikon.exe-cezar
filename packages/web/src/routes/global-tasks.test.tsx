@@ -274,6 +274,26 @@ describe('global tasks page', () => {
     )
   })
 
+  it('wears the handoff badge on rows that travelled between machines', async () => {
+    // Cross-machine handoff (spec 2026-09-19-cross-machine-task-handoff): the index row carries
+    // the same `handoff` the fat record does, so this page paints the same badge.
+    stubFetch({
+      runs: [
+        { ...RUNS[0]!, handoff: { direction: 'out', at: '2026-09-19T12:00:00.000Z' } },
+        { ...RUNS[1]!, handoff: { direction: 'in', at: '2026-09-19T12:00:00.000Z', peer: 'vps' } },
+        RUNS[2]!,
+      ],
+    })
+    renderPage()
+    await screen.findByText('Add checkout endpoint')
+
+    const row = (id: string) =>
+      document.querySelector(`[data-slot="global-task-row"][data-run-id="${id}"]`)
+    expect(row('a1')?.querySelector('[data-slot="handoff-badge"]')?.textContent).toBe('handed off')
+    expect(row('w1')?.querySelector('[data-slot="handoff-badge"]')?.textContent).toBe('imported')
+    expect(row('i1')?.querySelector('[data-slot="handoff-badge"]')).toBeNull()
+  })
+
   it('filters by tag across projects, and toggles back off', async () => {
     stubFetch()
     renderPage()

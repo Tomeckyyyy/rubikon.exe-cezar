@@ -2,6 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArchiveIcon,
   ArchiveRestoreIcon,
+  ArrowRightLeftIcon,
   BotIcon,
   CheckIcon,
   ChevronDownIcon,
@@ -20,7 +21,7 @@ import {
 import { Fragment, memo, useEffect, useId, useMemo, useReducer, useRef, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from '@/lib/project-router'
 
-import { ApiError, archiveRun, cancelRun, continueRun, deleteRun, openRunIn, openRunInCli } from '@/api/client'
+import { ApiError, archiveRun, cancelRun, continueRun, deleteRun, exportHandoff, openRunIn, openRunInCli } from '@/api/client'
 import {
   queryKeys,
   useAgentProfiles,
@@ -39,6 +40,7 @@ import {
 import { DEFAULT_AGENT_ACCOUNT_ID, type ApiRun, type OpenTarget } from '@open-mercato/cezar-api-client'
 import { DiffStatLabel } from '@/components/diff-stat'
 import { TitleEditInput, useTitleEditor, type TitleEditor } from '@/components/editable-title'
+import { HandoffBadge } from '@/components/handoff-badge'
 import { Pill } from '@/components/pill'
 import { ReferenceChip } from '@/components/reference-chip'
 import { ResolveConflictsButton } from '@/components/reference-conflict-action'
@@ -84,7 +86,7 @@ import { cn, isHttpUrl } from '@/lib/utils'
 
 import { Markdown } from './markdown'
 import { useContinuationProvider } from './continuation-provider'
-import { cliTargetResumes, cliTargetRunner, finishTitle, resumeHint, runActionFlags } from './run-actions'
+import { cliTargetResumes, cliTargetRunner, finishTitle, handoffBlockedReason, resumeHint, runActionFlags } from './run-actions'
 import { WorkflowSteps } from './step-rail'
 import { useFinishRun } from './use-finish-run'
 import { useDraft } from './thread-draft'
@@ -181,6 +183,9 @@ function RunHeaderView({
   ).data
   const health = useHealth()
   const metricVisibility = usageMetricVisibility(health.data)
+  // The local-machine gate every handoff surface reads (spec § UI/UX): absent until health
+  // answers, and false in hosted mode, so the action appears exactly where the routes work.
+  const localHandoff = health.data?.capabilities?.localHandoff === true
 
   return (
     <header
@@ -222,7 +227,12 @@ function RunHeaderView({
                 className={cn('transition-transform', detailsOpen && 'rotate-180')}
               />
             </Button>
-            <ActionsKebab run={run} actions={actions} onToggleNotes={() => setNotesOpen((open) => !open)} />
+            <ActionsKebab
+              run={run}
+              actions={actions}
+              localHandoff={localHandoff}
+              onToggleNotes={() => setNotesOpen((open) => !open)}
+            />
           </span>
         </div>
 
@@ -277,12 +287,35 @@ function RunHeaderView({
               <Button
                 variant="outline"
                 size="sm"
+                data-slot="continue-run"
                 title={actions.continuation.reason ?? 'Reopen the session'}
                 disabled={actions.continueRun.isPending || !actions.continuation.canContinue}
                 onClick={() => actions.continueRun.mutate()}
               >
                 <PlayIcon aria-hidden="true" />
                 Continue
+              </Button>
+            ) : null}
+            {/* Cross-machine hand-off (spec 2026-09-19-cross-machine-task-handoff). Local
+                machines only — in hosted mode the export route 409s, so the action is absent
+                rather than disabled, like the Changes tab's local-only actions. On a local
+                machine a non-terminal or already-handed-off run still shows the item, disabled
+                with the reason, because "why can't I hand this off?" deserves an answer. */}
+            {localHandoff ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                data-slot="handoff-run"
+                title={
+                  flags.handoff
+                    ? 'Export this task to a bundle another machine can import'
+                    : handoffBlockedReason(run)
+                }
+                disabled={!flags.handoff || actions.handoff.isPending}
+                onClick={() => actions.handoff.mutate()}
+              >
+                <ArrowRightLeftIcon aria-hidden="true" />
+                Hand off…
               </Button>
             ) : null}
             {/* Terminal is folded into the Open in… menu to save room in the actions row. */}
@@ -532,6 +565,19 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
       onError(error)
     },
   })
+  // Cross-machine hand-off (spec 2026-09-19-cross-machine-task-handoff): export THIS task to a
+  // bundle on the machine's cache shelf. `invalidate` covers the run list AND the detail query
+  // (`runs.all` is the `[scope, 'runs']` prefix), so the record's new `handoff` mark — and with
+  // it the badge and this button's own disabled state — appears without a manual refresh. A
+  // refusal (a live task, an unknown id) is the server's own sentence, verbatim.
+  const handoff = useMutation({
+    mutationFn: () => exportHandoff([run.id]),
+    onSuccess: (result) => {
+      invalidate()
+      toast(`Handed off — bundle ${result.bundle.name} is in the cezar cache`)
+    },
+    onError,
+  })
 
   return {
     finish,
@@ -543,6 +589,7 @@ function useRunActions(run: ApiRun, onMarkedUnread?: () => void) {
     cancel,
     delete: deleteMutation,
     terminal,
+    handoff,
     confirming,
     setConfirming,
   }
@@ -725,6 +772,11 @@ function MetaRow({
   const branch = run.branch
   if (branch) {
     parts.push(<CopyBranchChip key="branch" branch={branch} />)
+  }
+  // The run travelled between machines (spec 2026-09-19-cross-machine-task-handoff): the badge
+  // sits beside the branch because it is the same kind of fact — where this task physically is.
+  if (run.handoff) {
+    parts.push(<HandoffBadge key="handoff" handoff={run.handoff} />)
   }
   // EVERY PR the task points at, in `taskReferences` order — the same order, and the same
   // statuses, the global Tasks table paints. A task opened on someone else's PR that pushes a
@@ -1091,13 +1143,17 @@ function AgentBadge({ run, continuationEngine }: { run: ApiRun; continuationEngi
 function ActionsKebab({
   run,
   actions,
+  localHandoff,
   onToggleNotes,
 }: {
   run: ApiRun
   actions: RunActions
+  /** `capabilities.localHandoff` — hosted mode has no handoff routes, so the item is absent. */
+  localHandoff: boolean
   onToggleNotes: () => void
 }) {
   const flags = runActionFlags(run)
+  const handoffReason = flags.handoff ? undefined : handoffBlockedReason(run)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -1153,6 +1209,19 @@ function ActionsKebab({
           <DropdownMenuItem onSelect={() => actions.archive.mutate()}>
             {run.archived ? <ArchiveRestoreIcon aria-hidden="true" /> : <ArchiveIcon aria-hidden="true" />}
             {run.archived ? 'Unarchive' : 'Archive'}
+          </DropdownMenuItem>
+        ) : null}
+        {/* The same action as the desktop bar's, disabled with the same reason — the kebab is
+            the only action surface below `md`, so a status that cannot be handed off still has
+            to say why rather than hide the item. */}
+        {localHandoff ? (
+          <DropdownMenuItem
+            data-slot="handoff-run"
+            disabled={!flags.handoff || actions.handoff.isPending}
+            title={handoffReason}
+            onSelect={() => actions.handoff.mutate()}
+          >
+            <ArrowRightLeftIcon aria-hidden="true" /> Hand off…
           </DropdownMenuItem>
         ) : null}
         {flags.cancel || flags.deleteRun ? <DropdownMenuSeparator /> : null}

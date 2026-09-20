@@ -49,6 +49,16 @@ import {
   perRunner,
 } from '@open-mercato/cezar-contract';
 import { dispatchInputSchema, dispatchIntentSchema, dispatchReportSchema } from '@open-mercato/cezar-contract';
+import {
+  handoffExportRequestSchema,
+  handoffImportRequestSchema,
+  handoffPreviewQuerySchema,
+  handoffUnmarkRequestSchema,
+  type HandoffImportPlan,
+} from '@open-mercato/cezar-contract';
+import { defaultBundleName, exportRuns } from '../transfer/export.ts';
+import { importBundle, listBundles, planImport } from '../transfer/import.ts';
+import { TransferError, type HandoffManifest } from '../transfer/manifest.ts';
 import { detectEnvironment } from '../core/backend-detect.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
@@ -182,7 +192,7 @@ import { checkoutRepo, type CloneRunner } from './checkout.ts';
 import { ProjectContextError, ProjectContexts, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
 import { readUiState, uiStatePath } from '../ui-state.ts';
-import { agentHomePaths, expandTilde } from '../paths.ts';
+import { agentHomePaths, expandTilde, handoffBundleDir } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
 import { createSocketHub, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
@@ -255,6 +265,10 @@ export interface ServerDeps {
   cloneRunner?: CloneRunner;
   /** Host-wide model discovery service. Tests inject a deterministic adapter. */
   modelCatalog?: RunnerModelCatalog;
+  /** Where `cez handoff` bundles live (spec 2026-09-19-cross-machine-task-handoff). Defaults to
+   *  the machine cache root (`~/.cache/cez/handoff`); tests inject a temp dir so the suite never
+   *  reads or writes the user's cache. */
+  handoffDir?: string;
   /** Host-wide provider authentication discovery. Tests inject deterministic probes. */
   providerAuth?: ProviderAuthService;
   /** Global provider enablement preferences. Tests may inject an in-memory store. */
@@ -3740,6 +3754,160 @@ export function createApp(deps: ServerDeps) {
       return c.json({ ok: true as const });
     });
 
+  /**
+   * Cross-machine task handoff (spec `.ai/specs/2026-09-19-cross-machine-task-handoff.md`,
+   * Phase 3) — the cockpit's half of `cez handoff`. The CLI stays the primary surface; these
+   * routes are what the "Hand off" action, the import surface and the unmark undo call.
+   *
+   * Local-machine capability, gated like the agent-config writes: the routes read and write the
+   * server host's handoff cache (`~/.cache/cez/handoff/`) and its git worktrees, so hosted mode
+   * (`CEZ_REMOTE`) answers 409 rather than acting on a machine the caller cannot see.
+   *
+   * No live-instance problem here BY CONSTRUCTION: import and export run on the store this
+   * process owns in memory, which is exactly what the CLI cannot do and why the CLI refuses while
+   * this cockpit is up.
+   */
+  const requireLocalHandoff = async (c: Context, next: Next) => {
+    if (!capabilities().localHandoff) {
+      return c.json({ error: 'handoff needs the local machine — this cockpit is in remote mode' }, 409);
+    }
+    await next();
+  };
+
+  /** Resolve a bundle NAME inside the cache directory, refusing anything that escapes it. */
+  const handoffDir = resolve(deps.handoffDir ?? handoffBundleDir());
+  const resolveBundlePath = (name: string): string => {
+    const path = resolve(handoffDir, name);
+    if (dirname(path) !== handoffDir) throw new TransferError('bundle name escapes the handoff cache', 'not-a-bundle');
+    return path;
+  };
+
+  /** `{ error }` with 400/409 — the shapes the rest of the API answers with (no new statuses). */
+  const transferErrorResponse = (c: Context, err: unknown) => {
+    if (err instanceof TransferError) {
+      const status =
+        err.code === 'unknown-run'
+          ? 404
+          : err.code === 'branch-conflict' ||
+              err.code === 'live-instance' ||
+              err.code === 'not-registered' ||
+              err.code === 'not-terminal'
+            ? 409
+            : 400;
+      return c.json({ error: err.message }, status);
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ error: message }, 400);
+  };
+
+  /** The plan as the wire shape: the local absolute path stays on the server. */
+  const planResponse = (name: string, manifest: HandoffManifest, plan: Awaited<ReturnType<typeof planImport>>): HandoffImportPlan => ({
+    name,
+    formatVersion: manifest.formatVersion,
+    createdAt: manifest.createdAt,
+    cezarVersion: manifest.cezarVersion,
+    ...(manifest.sourceProjectId !== undefined ? { sourceProjectId: manifest.sourceProjectId } : {}),
+    runs: plan.entries.map((entry) => ({
+      id: entry.id,
+      title: entry.title,
+      status: entry.status,
+      action: entry.action,
+      ...(entry.branch !== undefined ? { branch: entry.branch } : {}),
+      worktree: entry.worktree,
+      ...(entry.worktreePath !== undefined ? { worktreePath: entry.worktreePath } : {}),
+      warnings: entry.warnings,
+    })),
+    branches: manifest.branches,
+    fetch: plan.fetch,
+    warnings: plan.warnings,
+  });
+
+  const handoffRoutes = new Hono<ProjectApiEnv>()
+    .use('/handoff/bundles', requireLocalHandoff)
+    .use('/handoff/bundles/preview', requireLocalHandoff)
+    .use('/handoff/export', requireLocalHandoff)
+    .use('/handoff/import', requireLocalHandoff)
+    .use('/handoff/unmark', requireLocalHandoff)
+
+    /** Bundles waiting in this machine's cache. Metadata only; the preview reads a manifest. */
+    .get('/handoff/bundles', (c) => {
+      const bundles = listBundles(handoffDir).map(({ name, sizeBytes, modifiedAt }) => ({
+        name,
+        sizeBytes,
+        modifiedAt,
+      }));
+      return c.json({ bundles });
+    })
+
+    /** Exactly what `cez handoff import --dry-run` prints, for the import surface's confirm step. */
+    .get('/handoff/bundles/preview', queryZodValidator(handoffPreviewQuerySchema), async (c) => {
+      const { name } = c.req.valid('query');
+      const { store, root, dataDir } = c.get('project');
+      try {
+        const plan = await planImport({ repoRoot: root, dataDir, store, bundlePath: resolveBundlePath(name) });
+        return c.json(planResponse(name, plan.manifest, plan));
+      } catch (err) {
+        return transferErrorResponse(c, err);
+      }
+    })
+
+    /** Export explicit tasks. Refusals (live tasks, unknown ids) are 409/400 with the CLI's text. */
+    .post('/handoff/export', jsonZodValidator(handoffExportRequestSchema), async (c) => {
+      const { store, root, dataDir, id: projectId } = c.get('project');
+      try {
+        const result = await exportRuns({
+          repoRoot: root,
+          dataDir,
+          store,
+          runIds: c.req.valid('json').runs,
+          outPath: join(handoffDir, defaultBundleName(projectId, () => new Date().toISOString())),
+          cezarVersion: version,
+          sourceProjectId: projectId,
+        });
+        const name = basename(result.bundlePath ?? '');
+        const entry = listBundles(handoffDir).find((bundle) => bundle.name === name);
+        return c.json({
+          bundle: entry ?? { name, sizeBytes: result.bundle.length, modifiedAt: new Date().toISOString() },
+          runs: result.runs.map((run) => run.id),
+          branches: result.branches,
+          notes: result.notes,
+        });
+      } catch (err) {
+        return transferErrorResponse(c, err);
+      }
+    })
+
+    /** Validate, fetch branches, reattach worktrees, upsert records — the CLI's import. */
+    .post('/handoff/import', jsonZodValidator(handoffImportRequestSchema), async (c) => {
+      const { name } = c.req.valid('json');
+      const { store, root, dataDir, id: projectId } = c.get('project');
+      try {
+        const result = await importBundle({
+          repoRoot: root,
+          dataDir,
+          store,
+          bundlePath: resolveBundlePath(name),
+          peer: undefined,
+        });
+        return c.json({ imported: result.imported, plan: planResponse(name, result.plan.manifest, result.plan) });
+      } catch (err) {
+        return transferErrorResponse(c, err);
+      }
+    })
+
+    /** The undo for an accidental hand-off — this machine can continue those tasks again. */
+    .post('/handoff/unmark', jsonZodValidator(handoffUnmarkRequestSchema), (c) => {
+      const { store } = c.get('project');
+      const unmarked: string[] = [];
+      for (const id of c.req.valid('json').runs) {
+        const run = store.getRun(id);
+        if (!run?.handoff) continue;
+        store.updateRun(id, { handoff: undefined });
+        unmarked.push(id);
+      }
+      return c.json({ unmarked });
+    });
+
   // ---- runs ----------------------------------------------------------------
 
   // Additive `usage` field (#348): the latest CPU/RSS/proc-count sample of the
@@ -5732,6 +5900,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', planRoutes)
     .route('/', automationsRoutes)
     .route('/', dispatchRoutes)
+    .route('/', handoffRoutes)
     .route('/', runsRoutes)
     .route('/', draftRoutes)
     .route('/', groupsRoutes)
@@ -5794,6 +5963,7 @@ export function createApp(deps: ServerDeps) {
     ...(run.autoResumeAt !== undefined ? { autoResumeAt: run.autoResumeAt } : {}),
     workflow: run.workflow,
     ...(run.branch !== undefined ? { branch: run.branch } : {}),
+    ...(run.handoff !== undefined ? { handoff: run.handoff } : {}),
     ...(run.dispatch !== undefined
       ? {
           dispatch: {
