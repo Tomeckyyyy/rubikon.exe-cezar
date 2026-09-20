@@ -106,6 +106,20 @@ function scopeRoute(route: string): string {
   return `/p/${encodeURIComponent(activeProjectId)}${route}`
 }
 
+/**
+ * `apiPath`'s EXPLICIT twin: always scopes to `projectId`, ignoring the ambient
+ * `activeProjectId` entirely — the same reasoning as `archiveProjectRun`/`getProjectRun`
+ * (client.ts) applied to a raw `EventSource` URL rather than the hono client.
+ *
+ * For a global, cross-project route (Mission Control, `.ai/specs/2026-09-18-mission-control.md`)
+ * `getApiScope()` answers with the BOOT project regardless of which project a given row actually
+ * belongs to — `apiPath()` would silently target the wrong run's stream, or the right id in the
+ * wrong project. This is the one caller that must never read the ambient scope.
+ */
+export function apiPathForProject(projectId: string, route: string): string {
+  return `${baseUrl}${API_PREFIX}/p/${encodeURIComponent(projectId)}${route}`
+}
+
 /** Matches a cockpit API URL and captures the part after `/api`, scope included. */
 const API_URL = /^\/api(?:\/v1)?(\/.*)$/
 

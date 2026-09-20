@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
-import { apiPath, getApiScope } from '@open-mercato/cezar-api-client'
+import { apiPath, apiPathForProject, getApiScope } from '@open-mercato/cezar-api-client'
 import type { RunEvent } from '@open-mercato/cezar-api-client'
 
 /**
@@ -140,11 +140,21 @@ export interface RunEventStreamOptions {
   compactAt?: number
   /** Return exactly the live sequence numbers now covered by durable history. */
   onCompact?: (events: readonly RunEvent[]) => RunEventCompaction | false | Promise<RunEventCompaction | false>
+  /**
+   * EXPLICIT project — the twin of `getProjectRun`/`archiveProjectRun` in `api/client.ts`, for
+   * the same global-route problem (spec 2026-09-18-mission-control, "Risks: Critical"): a caller
+   * standing OUTSIDE every `/p/:projectId` (Mission Control) cannot rely on the ambient
+   * `activeProjectId` naming the right project for a run it did not navigate to. When set, the
+   * socket URL is built via `apiPathForProject`, ignoring `getApiScope()` entirely. Omitted (the
+   * default, every existing caller) keeps the byte-identical ambient-scope URL.
+   */
+  projectId?: string
 }
 
 export function useRunEvents(runId: string | undefined, options: RunEventStreamOptions = {}): RunEvent[] {
   const [events, setEvents] = useState<RunEvent[]>([])
   const scope = getApiScope()
+  const explicitProjectId = options.projectId
   const optionsRef = useRef(options)
   optionsRef.current = options
   const maxSeqRef = useRef(0)
@@ -320,7 +330,10 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
         params.set('afterSeq', String(Math.max(pageHighWaterRef.current, maxSeqRef.current)))
       }
       const query = params.size > 0 ? `?${params.toString()}` : ''
-      const current = new Source(apiPath(`/runs/${encodeURIComponent(runId)}/events${query}`), {
+      const route = `/runs/${encodeURIComponent(runId)}/events${query}`
+      const { projectId } = optionsRef.current
+      const url = projectId !== undefined ? apiPathForProject(projectId, route) : apiPath(route)
+      const current = new Source(url, {
         withCredentials: true,
       })
       source = current
@@ -397,7 +410,11 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
       if (compactCommittedRef.current === requestCompaction) compactCommittedRef.current = undefined
       closeSource()
     }
-  }, [runId, scope])
+    // `explicitProjectId` joins `scope` here for the identical reason: unlike `cursor`/`afterSeq`
+    // (read fresh off `optionsRef` on every (re)open, no reconnect needed), which project this
+    // socket targets decides the URL's ORIGIN of truth and must reopen the connection when it
+    // changes — exactly like the ambient scope already does.
+  }, [runId, scope, explicitProjectId])
 
   useEffect(() => {
     if (events.length === 0) return

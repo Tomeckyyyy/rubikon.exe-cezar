@@ -1,0 +1,265 @@
+import { describe, expect, it } from 'vitest'
+
+import type { RunEvent, RunIndexEntry } from '@open-mercato/cezar-api-client'
+
+import {
+  applyMissionControlFilter,
+  fleetTotals,
+  isActiveRun,
+  lastToolCallTitle,
+  missionControlFilterLabel,
+  needsYouRun,
+  sortByAge,
+  splitActiveRuns,
+  splitByAttention,
+  statusBucketOf,
+  subtaskCounts,
+  tileStatusPaint,
+} from './mission-control'
+
+function run(overrides: Partial<RunIndexEntry> & { id: string }): RunIndexEntry {
+  return {
+    projectId: 'proj-1',
+    title: overrides.id,
+    status: 'running',
+    createdAt: '2026-09-19T00:00:00.000Z',
+    archived: false,
+    workflow: 'quick-task',
+    ...overrides,
+  }
+}
+
+describe('tileStatusPaint', () => {
+  // These assertions mirror `lib/attention.test.ts`'s own — tileStatusPaint is now a thin wrapper
+  // around `deriveAttention`, and the point of that change is that the two can never disagree.
+  it('paints running as a pulsing violet, matching the app-wide "in progress" color', () => {
+    expect(tileStatusPaint({ status: 'running' })).toEqual({
+      tone: 'violet',
+      pulse: true,
+      label: 'running',
+    })
+  })
+
+  it('paints queued as static, not pulsing — parked, not transitioning', () => {
+    expect(tileStatusPaint({ status: 'queued' }).pulse).toBe(false)
+  })
+
+  it('paints waiting amber and review violet — distinct, not the same accent', () => {
+    expect(tileStatusPaint({ status: 'waiting' }).tone).toBe('pending')
+    expect(tileStatusPaint({ status: 'review' }).tone).toBe('violet')
+  })
+
+  it.each(['done', 'failed', 'cancelled'] as const)('paints terminal status %s as static', (status) => {
+    expect(tileStatusPaint({ status }).pulse).toBe(false)
+  })
+})
+
+describe('needsYouRun / splitByAttention', () => {
+  it('treats only waiting/review as needing the person at the keyboard', () => {
+    expect(needsYouRun(run({ id: 'a', status: 'waiting' }))).toBe(true)
+    expect(needsYouRun(run({ id: 'b', status: 'review' }))).toBe(true)
+    expect(needsYouRun(run({ id: 'c', status: 'running' }))).toBe(false)
+    expect(needsYouRun(run({ id: 'd', status: 'queued' }))).toBe(false)
+  })
+
+  it('preserves order within each half', () => {
+    const runs = [
+      run({ id: 'r1', status: 'running' }),
+      run({ id: 'r2', status: 'waiting' }),
+      run({ id: 'r3', status: 'queued' }),
+      run({ id: 'r4', status: 'review' }),
+    ]
+    const { needsYou, working } = splitByAttention(runs)
+    expect(needsYou.map((r) => r.id)).toEqual(['r2', 'r4'])
+    expect(working.map((r) => r.id)).toEqual(['r1', 'r3'])
+  })
+})
+
+describe('sortByAge', () => {
+  it('orders oldest (by startedAt, falling back to createdAt) first', () => {
+    const runs = [
+      run({ id: 'newest', createdAt: '2026-09-19T00:03:00.000Z' }),
+      run({ id: 'oldest', createdAt: '2026-09-19T00:01:00.000Z' }),
+      run({ id: 'started-earlier-but-created-later', createdAt: '2026-09-19T00:05:00.000Z', startedAt: '2026-09-19T00:00:30.000Z' }),
+    ]
+    expect(sortByAge(runs).map((r) => r.id)).toEqual([
+      'started-earlier-but-created-later',
+      'oldest',
+      'newest',
+    ])
+  })
+
+  it('does not mutate the input array', () => {
+    const runs = [run({ id: 'a', createdAt: '2026-09-19T00:02:00.000Z' }), run({ id: 'b', createdAt: '2026-09-19T00:01:00.000Z' })]
+    sortByAge(runs)
+    expect(runs.map((r) => r.id)).toEqual(['a', 'b'])
+  })
+})
+
+describe('fleetTotals', () => {
+  it('sums cost only across runs still in flight, not finished ones', () => {
+    const runs = [
+      run({ id: 'a', status: 'running', costUsd: 1.5 }),
+      run({ id: 'b', status: 'waiting', costUsd: 0.5 }),
+      run({ id: 'c', status: 'done', costUsd: 9 }),
+    ]
+    expect(fleetTotals(runs).activeCostUsd).toBe(2)
+  })
+
+  it('counts every run into exactly one status bucket', () => {
+    const runs = [
+      run({ id: 'a', status: 'waiting' }),
+      run({ id: 'b', status: 'review' }),
+      run({ id: 'c', status: 'running' }),
+      run({ id: 'd', status: 'queued' }),
+      run({ id: 'e', status: 'done' }),
+      run({ id: 'f', status: 'failed' }),
+      run({ id: 'g', status: 'cancelled' }),
+    ]
+    expect(fleetTotals(runs).statusCounts).toEqual({
+      needsYou: 2,
+      working: 2,
+      done: 1,
+      failed: 1,
+      cancelled: 1,
+    })
+  })
+
+  it('totals cost per project across BOTH active and finished runs', () => {
+    const runs = [
+      run({ id: 'a', projectId: 'api', status: 'running', costUsd: 1 }),
+      run({ id: 'b', projectId: 'api', status: 'done', costUsd: 2 }),
+      run({ id: 'c', projectId: 'web', status: 'done', costUsd: 5 }),
+    ]
+    const { costByProject } = fleetTotals(runs)
+    expect(costByProject.get('api')).toBe(3)
+    expect(costByProject.get('web')).toBe(5)
+  })
+})
+
+describe('statusBucketOf', () => {
+  it.each([
+    ['waiting', 'needsYou'],
+    ['review', 'needsYou'],
+    ['running', 'working'],
+    ['queued', 'working'],
+    ['failed', 'failed'],
+    ['cancelled', 'cancelled'],
+    ['done', 'done'],
+  ] as const)('buckets %s as %s', (status, bucket) => {
+    expect(statusBucketOf({ status })).toBe(bucket)
+  })
+})
+
+describe('applyMissionControlFilter / missionControlFilterLabel', () => {
+  const runs = [
+    run({ id: 'a', projectId: 'api', status: 'waiting' }),
+    run({ id: 'b', projectId: 'api', status: 'running' }),
+    run({ id: 'c', projectId: 'web', status: 'done' }),
+  ]
+
+  it('passes every run through unchanged when there is no filter', () => {
+    expect(applyMissionControlFilter(runs, undefined).map((r) => r.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('narrows to one project', () => {
+    expect(applyMissionControlFilter(runs, { kind: 'project', projectId: 'api' }).map((r) => r.id)).toEqual([
+      'a',
+      'b',
+    ])
+  })
+
+  it('narrows to one status bucket', () => {
+    expect(applyMissionControlFilter(runs, { kind: 'status', bucket: 'working' }).map((r) => r.id)).toEqual(['b'])
+  })
+
+  it('labels a project filter by its resolved name, a status filter by its bucket name', () => {
+    const projectName = (id: string) => (id === 'api' ? 'API' : id)
+    expect(missionControlFilterLabel({ kind: 'project', projectId: 'api' }, projectName)).toBe('API')
+    expect(missionControlFilterLabel({ kind: 'status', bucket: 'needsYou' }, projectName)).toBe('needs you')
+    expect(missionControlFilterLabel(undefined, projectName)).toBeUndefined()
+  })
+})
+
+describe('isActiveRun / splitActiveRuns', () => {
+  it('treats queued/running/waiting/review as active and the rest as finished', () => {
+    expect(isActiveRun(run({ id: 'a', status: 'queued' }))).toBe(true)
+    expect(isActiveRun(run({ id: 'b', status: 'done' }))).toBe(false)
+  })
+
+  it('preserves the caller-provided order within each partition', () => {
+    const runs = [
+      run({ id: 'r1', status: 'done' }),
+      run({ id: 'r2', status: 'running' }),
+      run({ id: 'r3', status: 'failed' }),
+      run({ id: 'r4', status: 'queued' }),
+    ]
+    const { active, finished } = splitActiveRuns(runs)
+    expect(active.map((r) => r.id)).toEqual(['r2', 'r4'])
+    expect(finished.map((r) => r.id)).toEqual(['r1', 'r3'])
+  })
+})
+
+describe('subtaskCounts', () => {
+  it('counts direct children only, via the dispatch tree', () => {
+    const runs = [
+      run({ id: 'root' }),
+      run({ id: 'child-1', dispatch: { rootRunId: 'root', parentRunId: 'root', kind: 'implement' } }),
+      run({ id: 'child-2', dispatch: { rootRunId: 'root', parentRunId: 'root', kind: 'review' } }),
+      run({
+        id: 'grandchild',
+        dispatch: { rootRunId: 'root', parentRunId: 'child-1', kind: 'implement' },
+      }),
+      run({ id: 'standalone' }),
+    ]
+    const counts = subtaskCounts(runs)
+    expect(counts.get('root')).toBe(2)
+    expect(counts.get('child-1')).toBe(1)
+    expect(counts.get('child-2')).toBe(0)
+    expect(counts.get('standalone')).toBe(0)
+  })
+})
+
+function toolEvent(seq: number, type: RunEvent['type'], title: string): RunEvent {
+  return {
+    seq,
+    ts: '2026-09-19T00:00:00.000Z',
+    type,
+    item: { kind: 'tool', title },
+  } as RunEvent
+}
+
+describe('lastToolCallTitle', () => {
+  it('returns undefined for an empty or tool-less stream', () => {
+    expect(lastToolCallTitle([])).toBeUndefined()
+    expect(
+      lastToolCallTitle([
+        { seq: 1, ts: '2026-09-19T00:00:00.000Z', type: 'session.started' } as RunEvent,
+      ]),
+    ).toBeUndefined()
+  })
+
+  it('reads the title off the most recent item snapshot', () => {
+    const events = [
+      toolEvent(1, 'item.started', 'Read src/foo.ts'),
+      toolEvent(2, 'item.completed', 'Read src/foo.ts'),
+      toolEvent(3, 'item.started', 'Ran npm test'),
+    ]
+    expect(lastToolCallTitle(events)).toBe('Ran npm test')
+  })
+
+  it('ignores item.delta frames, which never carry a full item', () => {
+    const events = [
+      toolEvent(1, 'item.started', 'Read src/foo.ts'),
+      { seq: 2, ts: '2026-09-19T00:00:00.000Z', type: 'item.delta', itemId: 'x', field: 'text', delta: 'hi' } as RunEvent,
+    ]
+    expect(lastToolCallTitle(events)).toBe('Read src/foo.ts')
+  })
+
+  it('ignores non-tool items (messages/reasoning)', () => {
+    const events: RunEvent[] = [
+      { seq: 1, ts: '2026-09-19T00:00:00.000Z', type: 'item.started', item: { kind: 'message', text: 'hi' } } as RunEvent,
+    ]
+    expect(lastToolCallTitle(events)).toBeUndefined()
+  })
+})

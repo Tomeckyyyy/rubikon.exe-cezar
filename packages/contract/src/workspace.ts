@@ -237,6 +237,13 @@ export const workspaceUiStateSchema = z.looseObject({
    *  curated", so every default skill shows; a PRESENT array (even `[]`) means only those names
    *  show from that repo. */
   importedSkills: z.array(z.string()).optional(),
+  /** Mission Control's Grid⇄Swarm Graph toggle (spec 2026-09-18-mission-control), remembered the
+   *  same way `taskTable` is: a workspace preference of the person at the keyboard, not repo
+   *  data, so it lives here rather than localStorage. A NAMED, bounded field on both schemas —
+   *  exactly the precedent `taskTable.expandedColumns` set for foldable columns — instead of
+   *  round-tripping through this bag's passthrough as an untyped, client-cast value. Absent
+   *  means "never chosen"; the route defaults to `'grid'`. */
+  missionControlView: z.enum(['grid', 'graph']).optional(),
 });
 export type WorkspaceUiState = z.infer<typeof workspaceUiStateSchema>;
 
