@@ -499,9 +499,11 @@ clobbering it.
 
 `cez handoff push` never stops or starts the remote service for you — it prints
 the exact `systemctl` commands and the remote `import` line to run. The same
-import is available in the cockpit (Tasks → **Import a bundle**, local mode
-only) with the identical preview before anything is committed. `cez handoff
-list` shows the bundles waiting in the cache.
+export and import are available in the cockpit, local mode only: **Hand off…**
+on a finished task (the action bar and the ⋮ menu) writes the bundle through the
+running server's own store, so the CLI's stop-first requirement does not apply
+there, and **Tasks → Import a bundle** shows the identical preview before
+anything is committed. `cez handoff list` shows the bundles waiting in the cache.
 
 ---
 
