@@ -132,15 +132,19 @@ export async function pushBundle(request: PushRequest): Promise<PushResult> {
   return { remotePath, method: 'ssh' };
 }
 
-/** The commands `push` prints for the human to run on the destination — never executed here. */
+/** The commands `push` prints for the human to run on the destination — never executed here.
+ *  The destination's platform is not knowable from the source machine, so both service managers
+ *  are named; the person reading it knows which one their box uses. */
 export function remoteImportInstructions(host: string, remotePath: string): string[] {
   // The remote path is relative to the destination user's home; `~` spells that out for a reader.
   const shown = remotePath.startsWith('.') ? `~/${remotePath}` : remotePath;
   return [
     `  ssh ${host}   # then, on that machine:`,
-    '    sudo systemctl stop cezar.service          # or: systemctl --user stop cezar.service',
+    '    sudo systemctl stop cezar.service          # Linux; or: systemctl --user stop cezar.service',
+    '    # macOS (launchd):  launchctl bootout gui/$(id -u)/ai.cezar.cockpit',
     `    cez handoff import ${shown}`,
-    '    sudo systemctl start cezar.service         # or: systemctl --user start cezar.service',
+    '    sudo systemctl start cezar.service         # Linux; or: systemctl --user start cezar.service',
+    '    # macOS (launchd):  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.cezar.cockpit.plist',
     '',
     `  the cockpit on ${host} can now import it too (Tasks → Import a bundle), once its service is stopped.`,
   ];

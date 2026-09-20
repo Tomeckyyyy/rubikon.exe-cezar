@@ -127,7 +127,12 @@ describe('cez handoff (CLI)', () => {
     expect(await runHandoffCommand(['export', '--all', '--repo', source], io)).toBe(1);
     const refusal = io.errors.join('\n');
     expect(refusal).toContain('a cezar cockpit is running for this project');
-    expect(refusal).toContain('sudo systemctl stop cezar.service');
+    expect(refusal).toContain('Ctrl+C');
+    // The guidance is platform-specific (`server-install` writes systemd on Linux, launchd on
+    // macOS); the CLI runs on the machine holding the lock, so this assertion follows the host.
+    expect(refusal).toMatch(
+      process.platform === 'darwin' ? /launchctl bootout/ : /sudo systemctl stop cezar\.service/,
+    );
     expect(listBundles(bundleDir)).toHaveLength(0);
     releaseInstanceLock(source);
   });

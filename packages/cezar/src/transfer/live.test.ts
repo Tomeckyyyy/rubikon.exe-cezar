@@ -83,18 +83,33 @@ describe('live instance lock', () => {
     releaseInstanceLock(repo);
   });
 
-  it('names both systemd spellings, the pid and the port in the refusal', () => {
-    const text = liveInstanceRefusal({
-      pid: 4242,
-      repoRoot: repo,
-      startedAt: '2026-09-19T10:11:12.345Z',
-      port: 4321,
-    });
-    expect(text).toContain('pid 4242');
-    expect(text).toContain('port 4321');
-    expect(text).toContain('started 2026-09-19 10:11:12');
-    expect(text).toContain('sudo systemctl stop cezar.service');
-    expect(text).toContain('systemctl --user stop cezar.service');
-    expect(text).toContain('Ctrl+C');
+  it('names both service managers, the pid and the port in the refusal', () => {
+    const linux = liveInstanceRefusal(
+      {
+        pid: 4242,
+        repoRoot: repo,
+        startedAt: '2026-09-19T10:11:12.345Z',
+        port: 4321,
+      },
+      'linux',
+    );
+    expect(linux).toContain('pid 4242');
+    expect(linux).toContain('port 4321');
+    expect(linux).toContain('started 2026-09-19 10:11:12');
+    expect(linux).toContain('sudo systemctl stop cezar.service');
+    expect(linux).toContain('systemctl --user stop cezar.service');
+    expect(linux).toContain('Ctrl+C');
+    expect(linux).not.toContain('launchctl');
+
+    // macOS installs run as a launchd agent (`ai.cezar.cockpit`), so the systemd spelling would
+    // send a Mac user looking for a unit that does not exist.
+    const mac = liveInstanceRefusal(
+      { pid: 7, repoRoot: repo, startedAt: '2026-09-19T10:11:12.345Z' },
+      'darwin',
+    );
+    expect(mac).toContain('launchctl bootout gui/$(id -u)/ai.cezar.cockpit');
+    expect(mac).toContain('launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.cezar.cockpit.plist');
+    expect(mac).not.toContain('systemctl');
+    expect(mac).toContain('Ctrl+C');
   });
 });

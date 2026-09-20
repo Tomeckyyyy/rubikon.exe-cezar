@@ -116,17 +116,36 @@ export function findLiveInstance(
   return null;
 }
 
-/** The refusal both `export` and `import` share, with the stop/start guidance AGENTS.md requires
- *  ("prints the exact systemctl commands and asks") — the commands are printed, never run. */
-export function liveInstanceRefusal(instance: InstanceLock): string {
+/**
+ * The refusal both `export` and `import` share, with the stop/start guidance AGENTS.md requires
+ * ("prints the exact systemctl commands and asks") — the commands are printed, never run.
+ *
+ * The guidance is per-platform because the service is: `server-install` writes a systemd unit on
+ * Linux and a launchd agent (`ai.cezar.cockpit`) on macOS. `platform` is injectable so tests can
+ * pin both, and defaults to the machine the CLI is running on — which is the machine holding the
+ * lock, so the right commands are always the ones printed.
+ */
+export function liveInstanceRefusal(
+  instance: InstanceLock,
+  platform: NodeJS.Platform = process.platform,
+): string {
   const started = instance.startedAt.slice(0, 19).replace('T', ' ');
   const where = instance.port !== undefined ? ` on port ${instance.port}` : '';
+  const serviceLines =
+    platform === 'darwin'
+      ? [
+          '  launchd (cezar server-install):  launchctl bootout gui/$(id -u)/ai.cezar.cockpit',
+          '                                    # start again: launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.cezar.cockpit.plist',
+        ]
+      : [
+          '  systemd (cezar server-install):   sudo systemctl stop cezar.service',
+          '  a user unit:                      systemctl --user stop cezar.service',
+        ];
   return [
     `a cezar cockpit is running for this project (pid ${instance.pid}${where}, started ${started}) —`,
     'stop it first, so its in-memory run records cannot overwrite what this command writes.',
     '',
-    '  systemd (cezar server-install):   sudo systemctl stop cezar.service',
-    '  a user unit:                      systemctl --user stop cezar.service',
+    ...serviceLines,
     '  a manual `cez serve`:             press Ctrl+C in its terminal',
     '',
     'start it again the same way once the command finishes.',

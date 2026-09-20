@@ -105,8 +105,10 @@ describe('pushBundle', () => {
     expect(lines).toContain('ssh deploy@vps.example.com');
     expect(lines).toContain('sudo systemctl stop cezar.service');
     expect(lines).toContain('systemctl --user stop cezar.service');
+    expect(lines).toContain('launchctl bootout gui/$(id -u)/ai.cezar.cockpit');
     expect(lines).toContain('cez handoff import ~/.cache/cez/handoff/b.tgz');
     expect(lines).toContain('sudo systemctl start cezar.service');
+    expect(lines).toContain('launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.cezar.cockpit.plist');
   });
 });
 
