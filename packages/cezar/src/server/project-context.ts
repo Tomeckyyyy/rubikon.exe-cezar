@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { writeInstanceLock, releaseInstanceLock } from '../transfer/live.ts';
 import { AutomationStore } from '../automations/store.ts';
 import { reconcileAutomationReceipts } from '../automations/task-template.ts';
 import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from '../config.ts';
@@ -191,7 +192,7 @@ export class ProjectContexts {
     const ctx = this.contexts.get(projectId);
     if (!ctx) return false;
     this.contexts.delete(projectId);
-    teardown(ctx);
+    teardown({ store: ctx.store, manager: ctx.manager, root: ctx.root });
     return true;
   }
 
@@ -210,6 +211,12 @@ export class ProjectContexts {
     // keepLive + recover() (#367), same as serveCommand: runs that were live
     // when this project's context last existed are re-queued or resumed.
     const store = RunStore.open(dataDir, { keepLive: true });
+    // Heartbeat for `cez handoff` (spec 2026-09-19-cross-machine-task-handoff): this process now
+    // owns the project's in-memory `runs.json`, so a CLI export/import must refuse until it is
+    // stopped. Written here as well as at boot because a project registered and OPENED after the
+    // server started has no boot-time lock — and this is the moment it becomes at risk.
+    // Released in `teardown`; a stale file self-heals on the next pid check.
+    writeInstanceLock(project.root);
     const automationStore = this.deps.automationStore?.(project.id, project.root)
       ?? AutomationStore.open(dataDir);
     reconcileAutomationReceipts(automationStore, store);
@@ -242,15 +249,17 @@ export class ProjectContexts {
       return { id: project.id, root: project.root, dataDir, store, manager, automationStore, launchKey };
     } catch (err) {
       // A failed build must not leak the half-built context's subscriptions.
-      teardown({ store, manager });
+      teardown({ store, manager, root: project.root });
       throw err;
     }
   }
 }
 
 /** Shared teardown for built and half-built contexts. */
-function teardown(ctx: { store: RunStore; manager: RunManager }): void {
+function teardown(ctx: { store: RunStore; manager: RunManager; root?: string }): void {
   ctx.manager.dispose();
   ctx.store.flush();
   ctx.store.removeAllListeners();
+  // This process no longer owns the project's runs.json, so the handoff guard must let go too.
+  if (ctx.root) releaseInstanceLock(ctx.root);
 }
