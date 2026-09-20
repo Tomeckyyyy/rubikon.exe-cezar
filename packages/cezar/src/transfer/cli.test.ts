@@ -204,6 +204,29 @@ describe('cez handoff (CLI)', () => {
     expect(listIo.lines.join('\n')).toContain('cez handoff import');
   });
 
+  it('refuses an import while a live cockpit holds the destination project', async () => {
+    await runHandoffCommand(['export', '--all', '--repo', source], io);
+    const name = listBundles(bundleDir)[0]!.name;
+    // Runs LAST in this file on purpose: registering the source changes the default bundle name
+    // for any test that runs after it.
+    const { mergeWriteWorkspaceConfig } = await import('../workspace/config.ts');
+    await mergeWriteWorkspaceConfig((config) => {
+      config.projects.push({
+        id: 'live-src',
+        root: source,
+        name: 'src',
+        addedAt: '2026-09-19T00:00:00.000Z',
+        lastOpenedAt: '2026-09-19T00:00:00.000Z',
+        source: 'local',
+      });
+    });
+    writeInstanceLock(source, { port: 4321 });
+    const importIo = makeIo(source, bundleDir);
+    expect(await runHandoffCommand(['import', name, '--repo', source], importIo)).toBe(1);
+    expect(importIo.errors.join('\n')).toContain('a cezar cockpit is running for this project');
+    releaseInstanceLock(source);
+  });
+
   describe('push', () => {
     const calls: Array<{ exe: string; args: readonly string[]; stdin?: Buffer }> = [];
 

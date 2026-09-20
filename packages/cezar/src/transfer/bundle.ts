@@ -188,10 +188,19 @@ export function unpackBundle(bytes: Buffer): Map<string, Buffer> {
 
 /** Write bytes durably: temp file in the destination directory, then rename over the target. */
 export function writeDurable(path: string, bytes: Buffer): void {
-  mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
-  writeFileSync(tmp, bytes);
-  renameSync(tmp, path);
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    const tmp = `${path}.tmp`;
+    writeFileSync(tmp, bytes);
+    renameSync(tmp, path);
+  } catch (err) {
+    // A write failure must be a named refusal, not a raw fs error: the caller's contract is that
+    // nothing is marked handed-off unless the bundle is durably on disk.
+    throw new TransferError(
+      `could not write the bundle to ${path}: ${err instanceof Error ? err.message : String(err)}`,
+      'io-failed',
+    );
+  }
 }
 
 export function readBundleBytes(path: string): Buffer {

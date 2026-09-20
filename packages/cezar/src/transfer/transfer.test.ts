@@ -11,7 +11,7 @@ import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { RunManager } from '../workflows/run.ts';
 import { MANIFEST_FILE, parseManifest, unpackBundle } from './bundle.ts';
-import { exportRuns } from './export.ts';
+import { exportRuns, selectExportableRuns } from './export.ts';
 import { importBundle, normalizeImportedRun, planImport, resolveRegisteredProject } from './import.ts';
 import { TransferError } from './manifest.ts';
 
@@ -196,6 +196,27 @@ describe('export → import round trip', () => {
     ).rejects.toThrow(/is running/);
     expect(existsSync(bundlePath)).toBe(false);
     expect(store.getRun(runningId)?.handoff).toBeUndefined();
+  });
+
+  it('marks nothing when the bundle cannot be written', async () => {
+    store.flush(); // make runs.json a real file, so the child path below cannot be created
+    // The destination's parent is an existing FILE, so the durable write must fail.
+    const blocked = join(sourceData, 'runs.json', 'bundle.tgz');
+    await expect(
+      exportRuns({
+        repoRoot: source,
+        dataDir: sourceData,
+        store,
+        all: true,
+        outPath: blocked,
+        cezarVersion: '0.0.0-test',
+        now: () => '2026-09-19T10:00:00.000Z',
+      }),
+    ).rejects.toThrow(/could not write the bundle/);
+    expect(existsSync(blocked)).toBe(false);
+    expect(store.getRun(doneId)?.handoff).toBeUndefined();
+    // Not even the source-side auto-resume cleanup happened: the write is the commit point.
+    expect(store.getRun(failedId)?.autoResumeAt).toBe('2026-09-20T00:00:00.000Z');
   });
 
   it('imports into a second repo: records, worktrees, statuses, no launch', async () => {
@@ -423,5 +444,73 @@ describe('normalizeImportedRun', () => {
     const next = normalizeImportedRun(inPlace, { at: 'x' });
     expect(next.worktree).toBe(false);
     expect(next.worktreePath).toBeUndefined();
+  });
+});
+/** The pure half of export selection: which terminal tasks travel, and the exact refusals. */
+describe('selectExportableRuns', () => {
+  const runAt = (id: string, status: RunRecord['status']): RunRecord => ({
+    id,
+    title: id,
+    workflow: 'quick-task',
+    task: id,
+    status,
+    createdAt: '2026-09-19T00:00:00.000Z',
+    tokensUsed: 0,
+    archived: false,
+    steps: [],
+  });
+
+  const RUNS = [
+    runAt('aaaaaaaa-1', 'done'),
+    runAt('bbbbbbbb-1', 'failed'),
+    runAt('cccccccc-1', 'cancelled'),
+    runAt('dddddddd-1', 'review'),
+    runAt('eeeeeeee-1', 'queued'),
+    runAt('ffffffff-1', 'running'),
+    runAt('99999999-1', 'waiting'),
+  ];
+
+  it('takes every terminal status under --all and leaves the live ones out silently', () => {
+    const result = selectExportableRuns(RUNS, { all: true });
+    expect(result.selected.map((run) => run.id)).toEqual(['aaaaaaaa-1', 'bbbbbbbb-1', 'cccccccc-1', 'dddddddd-1']);
+    expect(result.problems).toEqual([]);
+  });
+
+  it('names each live status in its own refusal when one is asked for', () => {
+    const expectations: Array<[string, string]> = [
+      ['eeeeeeee-1', 'is queued'],
+      ['ffffffff-1', 'is running'],
+      ['99999999-1', 'is waiting'],
+    ];
+    for (const [id, phrasing] of expectations) {
+      const result = selectExportableRuns(RUNS, { runIds: [id] });
+      expect(result.selected).toEqual([]);
+      expect(result.problems[0]?.code).toBe('not-terminal');
+      expect(result.problems[0]?.message).toContain(phrasing);
+      expect(result.problems[0]?.message).toContain('export accepts done, failed, cancelled and review');
+    }
+  });
+
+  it('takes a unique prefix, and refuses unknown or ambiguous ids', () => {
+    const result = selectExportableRuns(RUNS, { runIds: ['aaaaaaaa'] });
+    expect(result.selected.map((run) => run.id)).toEqual(['aaaaaaaa-1']);
+
+    const duplicate = [...RUNS, runAt('aaaaaaaa-2', 'review')];
+    const ambiguous = selectExportableRuns(duplicate, { runIds: ['aaaaaaaa'] });
+    expect(ambiguous.selected).toEqual([]);
+    expect(ambiguous.problems[0]?.code).toBe('unknown-run');
+    expect(ambiguous.problems[0]?.message).toContain('matches 2 tasks');
+  });
+
+  it('requires a selection, and reports an empty project as nothing to export', () => {
+    const nothing = selectExportableRuns(RUNS, {});
+    expect(nothing.selected).toEqual([]);
+    expect(nothing.problems[0]?.code).toBe('nothing-to-export');
+    expect(nothing.problems[0]?.message).toContain('name a task id or pass --all');
+
+    const empty = selectExportableRuns([runAt('live-1', 'running')], { all: true });
+    expect(empty.selected).toEqual([]);
+    expect(empty.problems[0]?.code).toBe('nothing-to-export');
+    expect(empty.problems[0]?.message).toContain('no finished task');
   });
 });
