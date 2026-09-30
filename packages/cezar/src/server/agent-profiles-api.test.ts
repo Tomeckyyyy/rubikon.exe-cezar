@@ -94,7 +94,8 @@ describe('agent profiles API', () => {
       const body = await list();
       expect(body.editable).toBe(true);
       expect(body.profiles.every((p) => p.isDefault)).toBe(true);
-      expect(body.profiles.map((p) => p.provider)).toEqual(['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp']);
+      expect(body.profiles.map((p) => p.provider)).toEqual(['claude', 'codex', 'opencode', 'cursor', 'pi', 'gemini', 'omp']);
+      expect(body.profiles.map((p) => p.provider)).toEqual(['claude', 'codex', 'opencode', 'cursor', 'pi', 'gemini', 'omp']);
       expect(body.profiles.every((p) => p.id === 'default')).toBe(true);
     });
 

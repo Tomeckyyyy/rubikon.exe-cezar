@@ -7,6 +7,7 @@ const HOME: AgentHomePaths = {
   opencodeConfig: '/home/u/.config/opencode',
   cursor: '/home/u/.cursor',
   omp: '/home/u/.omp/agent',
+  gemini: '/home/u/.gemini',
 };
 
 describe('agent-config catalog', () => {
@@ -26,7 +27,7 @@ describe('agent-config catalog', () => {
   it('<repo>/AGENTS.md is ONE entry read by three runners', () => {
     const agents = CONFIG_FILES.filter((f) => f.label === 'AGENTS.md' && f.scope === 'project');
     expect(agents).toHaveLength(1);
-    expect(agents[0]!.runners).toEqual(['codex', 'opencode', 'omp']);
+    expect(agents[0]!.runners).toEqual(['codex', 'opencode', 'omp', 'gemini']);
   });
 
   it('resolves repo-relative paths under the repo root', () => {
@@ -68,8 +69,10 @@ describe('agent-config catalog', () => {
       'claude.project.mcp',
       'codex.project.config',
       'codex.user.config',
-      'cursor.project.mcp',
+'cursor.project.mcp',
       'cursor.user.mcp',
+      'gemini.project.settings',
+      'gemini.user.settings',
       'omp.project.mcp',
       'omp.user.mcp',
       'opencode.project.config',

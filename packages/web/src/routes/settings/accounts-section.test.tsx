@@ -755,8 +755,7 @@ describe('the agent accounts section', () => {
       [...document.querySelectorAll('[data-slot="accounts-tabs"] [data-provider]')].map((el) =>
         el.getAttribute('data-provider'),
       ),
-    ).toEqual(['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp'])
-  })
+    ).toEqual(['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp', 'gemini'])  })
 
   it('offers no Add on an agent that cannot carry a second account, and says why', async () => {
     serve({ editable: true, profileCapableProviders: ['claude', 'codex'],

@@ -23,6 +23,7 @@ import {
 } from '@/api/queries'
 import {
   agentAccountRouteId,
+  RUNNER_IDS,
   type AgentProfile,
   type AgentProfilesResponse,
   type BackendCheck,
@@ -95,7 +96,7 @@ const PROVIDER_LABEL: Record<ProviderId, string> = {
   cursor: 'Cursor',
   pi: 'pi',
   omp: 'OMP',
-}
+  gemini: 'Gemini CLI',}
 
 /** The vendor's own install/login instruction, shown when the CLI is not on this machine. */
 const PROVIDER_INSTALL: Record<ProviderId, string> = {
@@ -105,7 +106,7 @@ const PROVIDER_INSTALL: Record<ProviderId, string> = {
   cursor: 'curl https://cursor.com/install -fsS | bash',
   pi: 'https://github.com/badlogic/pi-mono',
   omp: 'brew install can1357/tap/omp',
-}
+  gemini: 'npm i -g @google/gemini-cli',}
 
 /** Same vocabulary the Providers card uses — one wording for "is this logged in?". */
 const STATUS_PRESENTATION = {
@@ -148,8 +149,7 @@ function AccountsPane({ data }: { data: AgentProfilesResponse }) {
   // Every agent gets a tab, including one that cannot carry a second login: the tab is where its
   // install state and config folder live, and hiding OpenCode would just move the question
   // "is OpenCode set up?" somewhere else.
-  const providers: ProviderId[] = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp']
-
+  const providers: ProviderId[] = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp', 'gemini']
   if (!data.editable) {
     return (
       <div

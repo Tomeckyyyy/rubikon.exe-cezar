@@ -1940,7 +1940,7 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
     // a parse failure, which is what keeps the enum meaningful.
     writeFileSync(
       join(dataDir, 'runs.json'),
-      JSON.stringify([{ ...LEGACY_RUN, runner: 'gemini' }]),
+      JSON.stringify([{ ...LEGACY_RUN, runner: 'no-such-runner' }]),
       'utf8',
     );
     expect(RunStore.open(dataDir).getRun('legacy-1')).toBeUndefined();

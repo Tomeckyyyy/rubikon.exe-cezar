@@ -106,6 +106,9 @@ export const BACKEND_MODEL_MAP: Readonly<Record<AgentBackend, BackendModelMap>> 
   // `provider/model` convention — no default provider, so a bare model is
   // rejected loudly and the full id goes to `--model`.
   omp: {},
+  // Gemini CLI serves Google's models only; a bare id (`gemini-3-flash-preview`) is Google's and
+  // goes to `--model` bare (#581).
+  gemini: { defaultProvider: 'google' },
 };
 
 const SLASH = '/';

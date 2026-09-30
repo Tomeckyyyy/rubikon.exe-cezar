@@ -167,6 +167,8 @@ export function agentHomePaths(env: NodeJS.ProcessEnv = process.env): AgentHomeP
     codex: env.CODEX_HOME?.trim() || join(home, '.codex'),
     opencodeConfig: join(xdgConfig, 'opencode'),
     cursor: env.CURSOR_CONFIG_DIR?.trim() || join(home, '.cursor'),
+    // Gemini CLI relocates its whole `.gemini` dir under `$GEMINI_CLI_HOME` (its `homedir()`).
+    gemini: join(env.GEMINI_CLI_HOME?.trim() || home, '.gemini'),
     // OMP's agent dir: `$PI_CODING_AGENT_DIR` RELOCATES the whole base (config.yml,
     // agent.db, AGENTS.md, mcp.json move with it), default `~/.omp/agent`.
     omp: env.PI_CODING_AGENT_DIR?.trim() || join(home, '.omp', 'agent'),

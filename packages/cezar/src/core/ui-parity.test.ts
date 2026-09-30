@@ -21,8 +21,7 @@ import { describe, expect, it } from 'vitest';
 import type { UiEvent, UiItem } from './ui-events.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BACKENDS = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp'] as const;
-
+const BACKENDS = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp', 'gemini'] as const;
 /** Every event across every golden fixture of one backend. */
 function fixtureEvents(backend: (typeof BACKENDS)[number]): UiEvent[] {
   const dir = join(HERE, '__fixtures__', backend);
@@ -97,11 +96,32 @@ const CAPABILITIES: ReadonlyArray<
   ['turn.completed with a stopReason', (events) => events.some((e) => e.type === 'turn.completed' && e.stopReason !== undefined)],
 ] as const;
 
+/**
+ * A capability the upstream WIRE cannot carry — never one a mapper merely forgot. Each entry is
+ * pinned in both directions below: every other capability still applies to that backend, and the
+ * gap itself must still hold, so the fixture that one day carries the data fails here and forces
+ * the exemption out.
+ *
+ * gemini / plan: Gemini CLI 0.60.0 sends no plan on the ACP wire (`__fixtures__/gemini/README.md`,
+ * `write-todos-quota.ndjson`). Decided for #581: accept the gap rather than read Gemini's private
+ * chat recording; the ACP mapper already maps a `plan` update, so that day needs only this entry
+ * removed.
+ */
+const WIRE_GAPS: Partial<Record<(typeof BACKENDS)[number], readonly string[]>> = {
+  gemini: ['plan.updated with entries (TodoWrite / todoList / todowrite)'],
+};
+
 describe('protocol v2 backend parity (all first-class mappers emit every matrix capability)', () => {
   for (const backend of BACKENDS) {
     const events = fixtureEvents(backend);
     for (const [name, produced, except] of CAPABILITIES) {
       if (except?.includes(backend)) continue;
+      if (WIRE_GAPS[backend]?.includes(name)) {
+        it(`${backend} cannot produce ${name} — a documented upstream wire gap, still true`, () => {
+          expect(produced(events)).toBe(false);
+        });
+        continue;
+      }
       it(`${backend} produces ${name}`, () => {
         expect(produced(events)).toBe(true);
       });

@@ -1,7 +1,6 @@
 import { z } from 'zod';
-
 /** The agent backends a run can be dispatched to. */
-export const runnerSchema = z.enum(['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp']);
+export const runnerSchema = z.enum(['claude', 'codex', 'opencode', 'cursor', 'pi', 'gemini', 'omp']);
 export type Runner = z.infer<typeof runnerSchema>;
 
 /** Git facts about the project root, or `null` when it is not a repository. */
@@ -14,8 +13,7 @@ export type RepoInfo = z.infer<typeof repoInfoSchema>;
 
 /** One probed CLI behind the Tools menu. */
 export const backendCheckSchema = z.object({
-  name: z.enum(['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp', 'gh', 'git']),
-  available: z.boolean(),
+  name: z.enum(['claude', 'codex', 'opencode', 'cursor', 'pi', 'gemini', 'omp', 'gh', 'git']),  available: z.boolean(),
   version: z.string().optional(),
   hint: z.string().optional(),
 });

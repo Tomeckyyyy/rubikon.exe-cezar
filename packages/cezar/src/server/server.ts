@@ -56,6 +56,7 @@ import {
   modelDiscoveryRunnerSchema,
   openProjectInSchema,
   updateProjectInputSchema,
+  perRunner,
 } from '@open-mercato/cezar-contract';
 import { dispatchInputSchema, dispatchIntentSchema, dispatchReportSchema } from '@open-mercato/cezar-contract';
 import { detectEnvironment } from '../core/backend-detect.ts';
@@ -3222,7 +3223,7 @@ export function createApp(deps: ServerDeps) {
     agentDefaults: z
       .object({
         runner: z.enum(PROVIDER_IDS).nullable().optional(),
-        models: z
+models: z
           .object({
             claude: z.string().trim().min(1).max(200).nullable().optional(),
             codex: z.string().trim().min(1).max(200).nullable().optional(),
@@ -3230,7 +3231,7 @@ export function createApp(deps: ServerDeps) {
             cursor: z.string().trim().min(1).max(200).nullable().optional(),
             pi: z.string().trim().min(1).max(200).nullable().optional(),
             omp: z.string().trim().min(1).max(200).nullable().optional(),
-          })
+            gemini: z.string().trim().min(1).max(200).nullable().optional(),          })
           .optional(),
       })
       .optional(),
@@ -6034,6 +6035,7 @@ export function createApp(deps: ServerDeps) {
         opencode: modelPresetSchema,
         cursor: modelPresetSchema,
         pi: modelPresetSchema,
+        gemini: modelPresetSchema,
       })
       .optional(),
     // Concurrency + memory guard (Settings → Resources). maxParallel clamps to
@@ -6691,7 +6693,10 @@ export function quoteResumeBin(bin: string): string | null {
  */
 export function resumeCommand(runner: string | undefined, sessionId: string): string | null {
   if (!isSafeSessionId(sessionId)) return null;
+  if (runner === undefined || runner === 'claude-cli') runner = 'claude';
   switch (runner) {
+    case 'claude':
+      return `claude --resume ${sessionId}`;
     case 'codex':
       return `codex resume ${sessionId}`;
     case 'opencode':
@@ -6706,7 +6711,9 @@ export function resumeCommand(runner: string | undefined, sessionId: string): st
       // The RPC session id is omp's own session id, which `--resume` accepts
       // (`omp --mode rpc --resume <id>` spawns the same process resumed).
       return `omp --resume ${sessionId}`;
-    default:
-      return `claude --resume ${sessionId}`;
+    case 'gemini':
+      // The ACP session id is the id of Gemini's own chat recording, which `--resume` accepts.
+      return `gemini --resume ${sessionId}`;    default:
+      return null;
   }
 }

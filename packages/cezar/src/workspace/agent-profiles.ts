@@ -43,14 +43,14 @@ export function defaultAgentProfile(
   env: NodeJS.ProcessEnv = process.env,
 ): ResolvedAgentProfile {
   const home = agentHomePaths(env);
-  const path =
+const path =
     provider === 'codex' ? home.codex
     : provider === 'opencode' ? home.opencodeConfig
     : provider === 'cursor' ? home.cursor
     : provider === 'omp' ? home.omp
+    : provider === 'gemini' ? home.gemini
     : home.claude;
-  return {
-    id: DEFAULT_AGENT_ACCOUNT_ID,
+  return {    id: DEFAULT_AGENT_ACCOUNT_ID,
     provider,
     label: 'Default',
     configDir: path,

@@ -6,9 +6,11 @@ import { AGENT_MODELS_LOCKED_ENV } from './agent-model-policy.ts';
 import { profileEnv } from './agent-profiles.ts';
 import { resolveClaudeBin } from './claude-bin.ts';
 import { quoteExecutable, withEnvPrefix } from './shell-env.ts';
+import { geminiHasCredentials } from './gemini-credentials.ts';
+import { GEMINI_AUTH_HINT } from './gemini-ui-mapper.ts';
 import { agentHomePaths } from '../paths.ts';
 
-export const PROVIDER_IDS = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp'] as const;
+export const PROVIDER_IDS = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'gemini', 'omp'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderConnectionState =
   | 'connected'
@@ -71,7 +73,7 @@ interface ProviderDescriptor {
   loginArgs: readonly string[];
   installHint: string;
   parse: (result: ProviderCommandResult) => ProviderConnectionState | null;
-  /**
+/**
    * An answer available WITHOUT spawning the CLI at all, checked before `runCommand` — `undefined`
    * defers to the normal probe. Every other backend's own CLI self-reports API-key vs. subscription
    * auth in its status command (codex literally prints "logged in using an API key"), so nothing
@@ -83,6 +85,8 @@ interface ProviderDescriptor {
    * spawn entirely removes that race instead of racing to out-guess it.
    */
   precheck?: () => ProviderConnectionState | undefined;
+  /** What to tell the user when `parse` answers `unknown` on purpose (default: the generic hint). */
+  unknownHint?: string;
 }
 
 const COMMAND_TIMEOUT_MS = 10_000;
@@ -256,6 +260,7 @@ function parsePiStatus(result: ProviderCommandResult): ProviderConnectionState |
   return null;
 }
 
+
 /**
  * omp has no auth-status subcommand: `--version` proves the CLI is there. Credentials live in
  * omp's own `agent.db` / OS keychain plus the provider-key environment (the same MULTI_PROVIDER_*
@@ -300,6 +305,18 @@ const OMP_CREDENTIAL_PREFIXES: readonly string[] = [
   'TOGETHER_',
   'FIREWORKS_',
 ];
+
+/**
+ * Gemini CLI has no `auth status` subcommand (#581): `--version` proves the CLI is there, and the
+ * credentials are read where the CLI itself reads them (`gemini-credentials.ts`). Evidence of a key,
+ * a gateway or a Vertex project is `connected`; its absence is `unknown`, never `disconnected` — a
+ * keychain-stored key or a Workspace login is invisible from outside — and carries the API-key hint.
+ */
+function parseGeminiStatus(result: ProviderCommandResult): ProviderConnectionState | null {
+  if (result.exitCode !== 0 || !/\d+\.\d+/.test(result.stdout)) return null;
+  return geminiHasCredentials() ? 'connected' : 'unknown';
+}
+
 const DESCRIPTORS: readonly ProviderDescriptor[] = [
   {
     id: 'claude',
@@ -345,6 +362,16 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
     parse: parsePiStatus,
   },
   {
+    id: 'gemini',
+    executable: () => process.env.CEZ_GEMINI_BIN ?? 'gemini',
+    statusArgs: ['--version'],
+    // No login subcommand: the interactive CLI's `/auth` is where a key is entered.
+    loginArgs: [],
+    installHint: `Install Gemini CLI (npm i -g @google/gemini-cli). ${GEMINI_AUTH_HINT}`,
+    parse: parseGeminiStatus,
+    unknownHint: GEMINI_AUTH_HINT,
+  },
+  {
     id: 'omp',
     executable: () => process.env.CEZ_OMP_BIN ?? 'omp',
     statusArgs: ['--version'],
@@ -352,6 +379,7 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
     loginArgs: [],
     installHint: `Install OMP (brew install can1357/tap/omp). ${OMP_AUTH_HINT}`,
     parse: parseOmpStatus,
+    unknownHint: OMP_AUTH_HINT,
   },
 ];
 
@@ -798,6 +826,7 @@ export class ProviderAuthService {
       return { provider: descriptor.id, status: 'unknown', hint: UNKNOWN_HINT };
     }
     const status = descriptor.parse(result);
+    if (status === 'unknown') return { provider: descriptor.id, status, hint: descriptor.unknownHint ?? UNKNOWN_HINT };
     if (status !== null) return { provider: descriptor.id, status };
     return { provider: descriptor.id, status: 'unknown', hint: UNKNOWN_HINT };
   }

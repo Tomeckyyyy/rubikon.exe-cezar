@@ -25,8 +25,7 @@
 /** The backend that produced a session — mirrors `RunnerId` in
  *  `agent-runner.ts` (kept structurally identical; a type-level test
  *  guards against drift so this module stays dependency-free). */
-export type UiBackend = 'claude' | 'codex' | 'opencode' | 'cursor' | 'pi' | 'omp';
-
+export type UiBackend = 'claude' | 'codex' | 'opencode' | 'cursor' | 'pi' | 'gemini' | 'omp';
 /**
  * Tool lifecycle status (ACP: pending/in_progress/completed/failed).
  * `running` ≡ ACP `in_progress` (opencode's word — reads better in code);

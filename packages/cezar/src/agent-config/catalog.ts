@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { RunnerId } from '../core/agent-runner.ts';
+import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 
 /**
  * The catalog of coding-agent config files cezar can surface and edit (spec
@@ -37,7 +37,8 @@ export interface AgentHomePaths {
   cursor: string;
   /** `$PI_CODING_AGENT_DIR` (the whole agent dir) or `~/.omp/agent` */
   omp: string;
-}
+  /** `$GEMINI_CLI_HOME/.gemini` or `~/.gemini` */
+  gemini: string;}
 
 export interface ConfigFileDef {
   /** Stable, opaque, URL-safe. The ONLY thing a client may name (traversal-proof). */
@@ -83,7 +84,10 @@ const CURSOR_CLI_CONFIG_DOCS = 'https://cursor.com/docs/cli/reference/configurat
 const OMP_CONFIG_DOCS = 'https://omp.sh/docs/settings';
 const OMP_MEMORY_DOCS = 'https://omp.sh/docs/context-files';
 const OMP_MCP_DOCS = 'https://omp.sh/docs/mcp';
-
+// Gemini CLI ships its docs in the npm package (`docs/`); these are the same files upstream.
+// Verified against the bundled copies in @google/gemini-cli 0.60.0, 2026-09-19 (#581).
+const GEMINI_CONFIG_DOCS = 'https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md';
+const GEMINI_MEMORY_DOCS = 'https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/gemini-md.md';
 /**
  * The table. Order is presentation order: per runner, then user → project →
  * local so each scope ladder reads top (broad) to bottom (specific).
@@ -434,10 +438,72 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     docsUrl: OMP_MCP_DOCS,
   },
 
-  // ---- Shared: <repo>/AGENTS.md is read by Codex, OpenCode and OMP (and deprecated agents-md discovery) ----
+// ---- Gemini CLI ----
+  {
+    id: 'gemini.user.settings',
+    runners: ['gemini'],
+    kind: 'settings',
+    scope: 'user',
+    resolve: (_repo, home) => join(home.gemini, 'settings.json'),
+    label: '~/.gemini/settings.json',
+    format: 'json',
+    tracked: 'outside-repo',
+    holdsMcp: true,
+    modelKey: 'model.name',
+    modelPriority: 1,
+    precedence:
+      'Applies to all Gemini CLI sessions for the current user. User settings override system defaults; project settings, the system settings file, environment variables and command-line arguments override them. MCP servers live under "mcpServers".',
+    docsUrl: GEMINI_CONFIG_DOCS,
+  },
+  {
+    id: 'gemini.project.settings',
+    runners: ['gemini'],
+    kind: 'settings',
+    scope: 'project',
+    resolve: (repo) => join(repo, '.gemini', 'settings.json'),
+    label: '.gemini/settings.json',
+    format: 'json',
+    tracked: 'tracked',
+    holdsMcp: true,
+    modelKey: 'model.name',
+    modelPriority: 2,
+    precedence:
+      'Applies only when running Gemini CLI from that specific project. Project settings override user settings and system defaults. MCP servers live under "mcpServers". Runs read the committed copy.',
+    docsUrl: GEMINI_CONFIG_DOCS,
+  },
+  {
+    id: 'gemini.user.memory',
+    runners: ['gemini'],
+    kind: 'memory',
+    scope: 'user',
+    resolve: (_repo, home) => join(home.gemini, 'GEMINI.md'),
+    label: '~/.gemini/GEMINI.md',
+    format: 'markdown',
+    tracked: 'outside-repo',
+    precedence:
+      'Global context file: provides default instructions for all your projects. Loaded first; GEMINI.md files found in the workspace and its parent directories are concatenated after it.',
+    docsUrl: GEMINI_MEMORY_DOCS,
+  },
+  {
+    id: 'gemini.project.memory',
+    runners: ['gemini'],
+    kind: 'memory',
+    scope: 'project',
+    resolve: (repo) => join(repo, 'GEMINI.md'),
+    label: 'GEMINI.md',
+    format: 'markdown',
+    tracked: 'tracked',
+    precedence:
+      'The CLI searches for GEMINI.md files in your configured workspace directories and their parent directories, and concatenates them after the global ~/.gemini/GEMINI.md. Runs read the committed copy.',
+    docsUrl: GEMINI_MEMORY_DOCS,
+  },
+
+
+
+  // ---- Shared: <repo>/AGENTS.md is read by Codex, OpenCode, Gemini and OMP ----
   {
     id: 'project.agents',
-runners: ['codex', 'opencode', 'omp'],
+    runners: ['codex', 'opencode', 'omp', 'gemini'],
     kind: 'memory',
     scope: 'project',
     resolve: (repo) => join(repo, 'AGENTS.md'),
@@ -445,7 +511,7 @@ runners: ['codex', 'opencode', 'omp'],
     format: 'markdown',
     tracked: 'tracked',
     precedence:
-      'Read by Codex, OpenCode and OMP (Claude ignores it). Codex concatenates it root-down; OpenCode uses the first match and prefers it over CLAUDE.md; OMP discovers standalone AGENTS.md files walking up from cwd to the repo root. Runs read the committed copy.',
+      'Read by Codex, OpenCode, Gemini and OMP (Claude ignores it). Codex concatenates it root-down; OpenCode uses the first match and prefers it over CLAUDE.md; Gemini and OMP discover standalone AGENTS.md files walking up from cwd to the repo root. Runs read the committed copy.',
     docsUrl: OPENCODE_RULES_DOCS,
   },
 ];

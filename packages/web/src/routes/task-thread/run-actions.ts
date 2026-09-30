@@ -43,7 +43,7 @@ const RESUME_COMMAND_PREFIX: Record<Runner, string> = {
   cursor: 'agent --resume',
   pi: 'pi --session',
   omp: 'omp --resume',
-}
+  gemini: 'gemini --resume',}
 
 /** The per-backend take-over command. Records without a runner recorded predate the runner
  *  choice and default to Claude, same as the server.

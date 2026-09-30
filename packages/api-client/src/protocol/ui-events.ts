@@ -16,8 +16,7 @@
  */
 
 /** The backend that produced a session. */
-export type UiBackend = 'claude' | 'codex' | 'opencode' | 'cursor' | 'pi' | 'omp'
-
+export type UiBackend = 'claude' | 'codex' | 'opencode' | 'cursor' | 'pi' | 'gemini' | 'omp'
 /** Tool lifecycle status (ACP-aligned; `running` ≡ ACP `in_progress`). */
 export type ToolStatus = 'pending' | 'running' | 'completed' | 'failed' | 'declined'
 
