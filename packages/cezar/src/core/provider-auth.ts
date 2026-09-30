@@ -3,14 +3,16 @@ import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { AGENT_MODELS_LOCKED_ENV } from './agent-model-policy.ts';
 import { profileEnv } from './agent-profiles.ts';
+import { RUNNER_IDS, type RunnerId } from './agent-runner.ts';
 import { resolveClaudeBin } from './claude-bin.ts';
 import { quoteExecutable, withEnvPrefix } from './shell-env.ts';
 import { probeJunieAuthentication } from './junie-auth-probe.ts';
 import { geminiHasCredentials } from './gemini-credentials.ts';
 import { GEMINI_AUTH_HINT } from './gemini-ui-mapper.ts';
 
-export const PROVIDER_IDS = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'junie', 'copilot', 'gemini'] as const;
-export type ProviderId = (typeof PROVIDER_IDS)[number];
+/** Every runner is a provider cezar verifies — one tuple, the contract's. */
+export const PROVIDER_IDS = RUNNER_IDS;
+export type ProviderId = RunnerId;
 export type ProviderConnectionState =
   | 'connected'
   | 'disconnected'
