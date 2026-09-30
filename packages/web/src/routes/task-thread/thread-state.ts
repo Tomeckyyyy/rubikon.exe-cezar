@@ -1,6 +1,7 @@
 import type { RunEvent, RunStatus } from '@open-mercato/cezar-api-client'
 import { runItemKey } from '@/api/run-events'
 import {
+  runnerSchema,
   toolDisplay,
   type PlanEntry,
   type PlanStatus,
@@ -217,18 +218,8 @@ function stamp(value: unknown): string | undefined {
 }
 
 function providerId(value: unknown): ThreadProviderAuthRequired['provider'] | undefined {
-  return (
-    value === 'claude' ||
-    value === 'codex' ||
-    value === 'junie' ||
-    value === 'opencode' ||
-    value === 'cursor' ||
-    value === 'pi' ||
-    value === 'copilot' ||
-    value === 'gemini'
-  )
-    ? value
-    : undefined
+  const parsed = runnerSchema.safeParse(value)
+  return parsed.success ? parsed.data : undefined
 }
 
 const isAskQuestion = (value: unknown): value is UiAskQuestion =>
