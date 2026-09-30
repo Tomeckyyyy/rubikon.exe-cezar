@@ -109,6 +109,10 @@ export class OmpRpcRunner implements AgentRunner {
     child.on('error', (error: NodeJS.ErrnoException) => {
       spawnError = wrapSpawnError(error, this.bin);
     });
+    // A child that dies before draining its stdin (a CLI that fails at startup) surfaces as an
+    // asynchronous EPIPE on the pipe; unhandled, that 'error' event takes the whole cockpit
+    // process down. The exit code and stderr below already explain the failure.
+    child.stdin.on('error', () => {});
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => stderr.push(chunk));
 
@@ -177,11 +181,19 @@ export class OmpRpcRunner implements AgentRunner {
       child.stdin.end();
       armWatchdog();
     };
+    /** Cancel: tell omp to abort, close its stdin and signal outright (AGENT_PROTOCOL.md §1 —
+     *  `interrupt()` signals, it does not wait for a graceful EOF); the watchdog escalates to
+     *  SIGKILL if the CLI swallows SIGTERM. */
     const interrupt = (): void => {
       if (!open) return;
       weClosed = true;
       write({ type: 'abort' });
       open = false;
+      child.stdin.end();
+      if (child.exitCode == null) {
+        sigTermSent = true;
+        child.kill('SIGTERM');
+      }
       armWatchdog();
     };
     const maybeAutoEnd = (): void => {
@@ -312,7 +324,7 @@ export class OmpRpcRunner implements AgentRunner {
         const message = `omp CLI timed out after ${Math.round((limitMs / 60_000) * 10) / 10}m and was killed`;
         onEvent?.({ type: 'error', message });
         onEvent?.({ type: 'done' });
-        return { text: textChunks.join('').trim(), toolCalls, tokensUsed, sessionId };
+        return { text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId };
       }
       // A signal exit after WE asked the process to go (EOF ended, or the
       // watchdog's SIGTERM) is our own teardown, not an agent failure (#703).
@@ -326,7 +338,7 @@ export class OmpRpcRunner implements AgentRunner {
       if (tokensUsed === 0) onEvent?.({ type: 'note', message: 'token usage not reported by omp CLI' });
       opts.onUiEvent?.({ type: 'session.ended', reason: ompUi.stopReason });
       onEvent?.({ type: 'done' });
-      return { text: textChunks.join('').trim(), toolCalls, tokensUsed, sessionId };
+      return { text: textChunks.join('\n').trim(), toolCalls, tokensUsed, sessionId };
     })();
 
     const session: AgentSession = {

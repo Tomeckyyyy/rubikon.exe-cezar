@@ -58,6 +58,8 @@ describe('a dry-run omp session emits normalized AgentEvents', () => {
   afterEach(() => {
     if (saved === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = saved;
+    delete process.env.CEZ_MOCK_OMP_IGNORE_TERM;
+    delete process.env.CEZ_MOCK_OMP_EXIT_AT_ONCE;
     rmSync(cwd, { recursive: true, force: true });
   });
 
@@ -103,12 +105,14 @@ describe('a dry-run omp session emits normalized AgentEvents', () => {
     expect(result.text.length).toBeGreaterThan(0);
   });
 
-  it('hard-stops a child that ignores SIGTERM (SIGTERM→SIGKILL watchdog)', async () => {
+  it('hard-stops a child that ignores EOF and SIGTERM (SIGTERM→SIGKILL watchdog)', async () => {
     // The timeout watchdog alone must not resolve a wedged teardown: a CLI that
-    // swallows SIGTERM needs the SIGKILL escalation (AGENT_PROTOCOL.md §1).
+    // swallows SIGTERM needs the SIGKILL escalation (AGENT_PROTOCOL.md §1). The
+    // mock keeps its event loop alive past stdin EOF, so only the kill ends it.
     process.env.CEZ_MOCK_OMP_IGNORE_TERM = '1';
     const runner = new OmpRpcRunner({ settleGraceMs: 200, killGraceMs: 300 });
     const events: AgentEvent[] = [];
+    const started = Date.now();
     const result = await runner.run(
       { userPrompt: 'investigate', cwd, timeoutMs: 20_000 },
       (event) => events.push(event),
@@ -119,6 +123,44 @@ describe('a dry-run omp session emits normalized AgentEvents', () => {
     expect(types).not.toContain('error');
     expect(types.filter((t) => t === 'done')).toHaveLength(1);
     expect(result.text.length).toBeGreaterThan(0);
+    // EOF grace + SIGTERM grace + SIGKILL — well under the 20 s run timeout.
+    expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it('interrupt() signals outright — a cancel settles in well under the kill grace', async () => {
+    // AGENT_PROTOCOL.md §1: cancellation does not wait for a graceful EOF. A mock
+    // that ignores EOF and SIGTERM still goes down on the SIGKILL escalation.
+    process.env.CEZ_MOCK_OMP_IGNORE_TERM = '1';
+    const runner = new OmpRpcRunner({ killGraceMs: 300 });
+    const events: AgentEvent[] = [];
+    let sawText: () => void = () => {};
+    const firstText = new Promise<void>((resolve) => { sawText = resolve; });
+    const session = runner.startSession(
+      { userPrompt: 'investigate', cwd, timeoutMs: 20_000 },
+      (event) => {
+        events.push(event);
+        if (event.type === 'text') sawText();
+      },
+    );
+    await firstText;
+    const started = Date.now();
+    session.interrupt();
+    const result = await session.result;
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(events.map((e) => e.type)).not.toContain('error');
+    expect(result.text).toContain('Investigating');
+  });
+
+  it('survives a CLI that exits before reading its prompt (stdin EPIPE is not fatal)', async () => {
+    // An unhandled 'error' on the child's stdin pipe would take the whole cockpit down.
+    process.env.CEZ_MOCK_OMP_EXIT_AT_ONCE = '1';
+    const runner = new OmpRpcRunner();
+    const events: AgentEvent[] = [];
+    await expect(runner.run(
+      { userPrompt: 'x'.repeat(200_000), cwd, timeoutMs: 20_000 },
+      (event) => events.push(event),
+    )).rejects.toThrow(/exited with code 3/);
+    expect(events.map((e) => e.type)).toContain('error');
   });
 });
 

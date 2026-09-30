@@ -64,13 +64,19 @@ export function providerAuthChecksDisabled(
   return env[AGENT_MODELS_LOCKED_ENV] === '1';
 }
 
+/** What a status parser may consult beyond the command's own answer. */
+export interface ProviderParseContext {
+  /** The account's config dir when a non-default account is being probed; absent = the default. */
+  configDir?: string;
+}
+
 interface ProviderDescriptor {
   id: ProviderId;
   executable: () => string;
   statusArgs: readonly string[];
   loginArgs: readonly string[];
   installHint: string;
-  parse: (result: ProviderCommandResult) => ProviderConnectionState | null;
+  parse: (result: ProviderCommandResult, context: ProviderParseContext) => ProviderConnectionState | null;
   /**
    * An answer available WITHOUT spawning the CLI at all, checked before `runCommand` — `undefined`
    * defers to the normal probe. Every other backend's own CLI self-reports API-key vs. subscription
@@ -269,25 +275,35 @@ function parsePiStatus(result: ProviderCommandResult): ProviderConnectionState |
 const OMP_AUTH_HINT =
   'omp keeps its login in its own auth store — run `omp` once and log in; provider API keys in the environment (e.g. OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY) also work';
 
-function parseOmpStatus(result: ProviderCommandResult): ProviderConnectionState | null {
+function parseOmpStatus(result: ProviderCommandResult, context: ProviderParseContext): ProviderConnectionState | null {
   if (result.exitCode !== 0 || !/\d+\.\d+/.test(result.stdout)) return null;
-  return ompHasConfiguredCredential() ? 'connected' : 'unknown';
+  return ompHasConfiguredCredential(context.configDir) ? 'connected' : 'unknown';
 }
 
-function ompHasConfiguredCredential(): boolean {
-  // A name match is not enough: `OPENROUTER_API_KEY=` (set but empty) is no credential.
-  const hasNonEmptyEnvKey = Object.keys(process.env).some((name) =>
-    OMP_CREDENTIAL_PREFIXES.some((prefix) =>
-      name.toUpperCase().startsWith(prefix) && (process.env[name] ?? '').trim() !== '',
-    ),
-  );
-  if (hasNonEmptyEnvKey) return true;
-  // omp persists logins in its own auth store; its presence is the file-shaped evidence.
-  return existsSync(join(agentHomePaths(process.env).omp, 'agent.db'));
+/**
+ * Evidence of an omp login, for the account being probed: a non-empty provider KEY in the
+ * environment, or the `agent.db` omp writes on login into the account's own agent dir (a second
+ * account is its own `$PI_CODING_AGENT_DIR`, so the default account's store says nothing about it).
+ */
+function ompHasConfiguredCredential(configDir?: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const hasNonEmptyKey = Object.keys(env).some((name) => isOmpCredentialVariable(name) && (env[name] ?? '').trim() !== '');
+  if (hasNonEmptyKey) return true;
+  return existsSync(join(configDir ?? agentHomePaths(env).omp, 'agent.db'));
+}
+
+/**
+ * Only a KEY-shaped variable of a provider family omp resolves is a credential: `OPENAI_BASE_URL`
+ * or `ANTHROPIC_MODEL` name a provider without authenticating anything. Mirrors
+ * MULTI_PROVIDER_PREFIXES in agent-env.ts for the families; exported so the tests strip exactly
+ * the variables the check reads.
+ */
+export function isOmpCredentialVariable(name: string): boolean {
+  const upper = name.toUpperCase();
+  return OMP_CREDENTIAL_PREFIXES.some((prefix) => upper.startsWith(prefix)) && /(_API_KEY|_KEY|_TOKEN)$/.test(upper);
 }
 
 /** The provider-key families omp resolves from the environment (mirrors MULTI_PROVIDER_PREFIXES in agent-env.ts). */
-const OMP_CREDENTIAL_PREFIXES: readonly string[] = [
+export const OMP_CREDENTIAL_PREFIXES: readonly string[] = [
   'OPENAI_',
   'ANTHROPIC_',
   'AZURE_OPENAI_',
@@ -800,7 +816,7 @@ export class ProviderAuthService {
     if (result.errorCode) {
       return { provider: descriptor.id, status: 'unknown', hint: UNKNOWN_HINT };
     }
-    const status = descriptor.parse(result);
+    const status = descriptor.parse(result, configDir ? { configDir } : {});
     if (status === 'unknown') return { provider: descriptor.id, status, hint: descriptor.unknownHint ?? UNKNOWN_HINT };
     if (status !== null) return { provider: descriptor.id, status };
     return { provider: descriptor.id, status: 'unknown', hint: UNKNOWN_HINT };

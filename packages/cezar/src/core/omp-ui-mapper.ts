@@ -296,7 +296,8 @@ function mapToolEnd(value: Record<string, unknown>, state: OmpUiMapperState): Om
   if (!id || !previous) return { events: [], state };
   const result = isRecord(value.result) ? value.result : {};
   const details = isRecord(result.details) ? result.details : {};
-  const output = contentText(result.content) ?? (previous.output !== undefined ? undefined : previous.output);
+  // A result without text keeps whatever the pending item already showed.
+  const output = contentText(result.content) ?? previous.output;
   const isError = value.isError === true;
   const exitCode = number(details.exitCode);
   const item: UiToolItem = {

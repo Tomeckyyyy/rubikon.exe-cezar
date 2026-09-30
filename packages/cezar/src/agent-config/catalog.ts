@@ -33,7 +33,7 @@ export interface AgentHomePaths {
   codex: string;
   /** `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode` */
   opencodeConfig: string;
-/** `$CURSOR_CONFIG_DIR` or `~/.cursor` */
+  /** `$CURSOR_CONFIG_DIR` or `~/.cursor` */
   cursor: string;
   /** `$PI_CODING_AGENT_DIR` (the whole agent dir) or `~/.omp/agent` */
   omp: string;
@@ -437,7 +437,7 @@ export const CONFIG_FILES: ConfigFileDef[] = [
   // ---- Shared: <repo>/AGENTS.md is read by Codex, OpenCode and OMP (and deprecated agents-md discovery) ----
   {
     id: 'project.agents',
-runners: ['codex', 'opencode', 'omp'],
+    runners: ['codex', 'opencode', 'omp'],
     kind: 'memory',
     scope: 'project',
     resolve: (repo) => join(repo, 'AGENTS.md'),
