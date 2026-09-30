@@ -83,6 +83,8 @@ interface ProviderDescriptor {
    * spawn entirely removes that race instead of racing to out-guess it.
    */
   precheck?: () => ProviderConnectionState | undefined;
+  /** What to tell the user when `parse` answers `unknown` on purpose (default: the generic hint). */
+  unknownHint?: string;
 }
 
 const COMMAND_TIMEOUT_MS = 10_000;
@@ -352,6 +354,7 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
     loginArgs: [],
     installHint: `Install OMP (brew install can1357/tap/omp). ${OMP_AUTH_HINT}`,
     parse: parseOmpStatus,
+    unknownHint: OMP_AUTH_HINT,
   },
 ];
 
@@ -798,6 +801,7 @@ export class ProviderAuthService {
       return { provider: descriptor.id, status: 'unknown', hint: UNKNOWN_HINT };
     }
     const status = descriptor.parse(result);
+    if (status === 'unknown') return { provider: descriptor.id, status, hint: descriptor.unknownHint ?? UNKNOWN_HINT };
     if (status !== null) return { provider: descriptor.id, status };
     return { provider: descriptor.id, status: 'unknown', hint: UNKNOWN_HINT };
   }

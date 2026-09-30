@@ -15,7 +15,13 @@ import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { providerStatusFor } from '@/lib/provider-status'
 
-const PROVIDERS = [
+/**
+ * `explainsUnknown`: for most agents `unknown` means the check itself failed, so the card offers a
+ * retry. omp has no auth-status command: its `unknown` means "no credential cezar can see" (the
+ * login lives in omp's own agent.db / keychain), and the server's hint — run `omp` once and log
+ * in, or export a provider key — is the actionable part, so the card shows it instead.
+ */
+const PROVIDERS: ReadonlyArray<{ id: ProviderId; label: string; login: string; explainsUnknown?: boolean }> = [
   { id: 'claude', label: 'Claude Code', login: 'claude auth login' },
   { id: 'codex', label: 'Codex', login: 'codex login' },
   { id: 'opencode', label: 'OpenCode', login: 'opencode auth login' },
@@ -23,7 +29,7 @@ const PROVIDERS = [
   { id: 'pi', label: 'pi', login: 'pi /login' },
   // omp's auth lives in its own agent.db; `unknown` means "no credential cezar can see" and the
   // hint points at the interactive CLI.
-  { id: 'omp', label: 'OMP', login: 'omp' },
+  { id: 'omp', label: 'OMP', login: 'omp', explainsUnknown: true },
 ] as const
 
 const providerWriteState = <T,>(value: T): Record<ProviderId, T> => ({
@@ -242,6 +248,10 @@ export function ProviderSettings() {
                     {state === 'not-installed' ? (
                       <p className="mt-1.5 text-xs text-soft-foreground">
                         Install {provider.label}, then run <code>{provider.login}</code>.
+                      </p>
+                    ) : state === 'unknown' && provider.explainsUnknown && current?.hint ? (
+                      <p data-slot="provider-auth-hint" className="mt-1.5 text-xs text-soft-foreground">
+                        {current.hint}
                       </p>
                     ) : state === 'unknown' || (status.isError && !state) ? (
                       <p className="mt-1.5 text-xs text-soft-foreground">

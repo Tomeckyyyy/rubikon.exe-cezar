@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -41,7 +41,7 @@ const CONNECTED_OUTPUT: Record<ProviderId, string> = {
 };
 
 const providerForExecutable = (executable: string): ProviderId => {
-  if (executable === 'claude' || executable === 'codex' || executable === 'opencode' || executable === 'pi') return executable;
+  if (executable === 'claude' || executable === 'codex' || executable === 'opencode' || executable === 'pi' || executable === 'omp') return executable;
   if (executable === 'agent') return 'cursor';
   throw new Error(`unexpected executable: ${executable}`);
 };
@@ -66,11 +66,17 @@ describe('watchProviderRuntimeAuthFailures', () => {
   let providerAuth: ProviderAuthService;
   const unwatchers: Array<() => void> = [];
   const savedDryRun = process.env.CEZ_DRY_RUN;
+  const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+  let ompAgentDir: string;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'cez-provider-auth-runtime-'));
     store = RunStore.open(join(root, '.ai/cezar'));
     delete process.env.CEZ_DRY_RUN;
+    // omp reads its login evidence off the host: pin an agent.db so the suite is hermetic.
+    ompAgentDir = mkdtempSync(join(tmpdir(), 'cez-omp-agent-'));
+    writeFileSync(join(ompAgentDir, 'agent.db'), '');
+    process.env.PI_CODING_AGENT_DIR = ompAgentDir;
     const runCommand = vi.fn<RunProviderCommand>(async (executable) => ({
       stdout: CONNECTED_OUTPUT[providerForExecutable(executable)],
       stderr: '',
@@ -87,6 +93,9 @@ describe('watchProviderRuntimeAuthFailures', () => {
     for (const unwatch of unwatchers.splice(0)) unwatch();
     store.flush();
     rmSync(root, { recursive: true, force: true });
+    rmSync(ompAgentDir, { recursive: true, force: true });
+    if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;
   });

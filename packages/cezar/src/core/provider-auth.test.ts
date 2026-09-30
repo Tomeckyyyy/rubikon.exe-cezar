@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -63,9 +66,21 @@ const originalEnv = {
   CEZ_OPENCODE_BIN: process.env.CEZ_OPENCODE_BIN,
   CEZ_PI_BIN: process.env.CEZ_PI_BIN,
   CURSOR_API_KEY: process.env.CURSOR_API_KEY,
+  PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
 };
 
+/**
+ * omp's connectedness is file-shaped evidence (`agent.db` in its agent dir) or a non-empty
+ * provider key in the environment — both read from the HOST. Point the agent dir at a fresh temp
+ * dir holding an `agent.db` so every suite below sees omp connected regardless of who runs it;
+ * the omp-specific block strips that evidence again to pin the `unknown` path.
+ */
+let ompAgentDir: string;
+
 beforeEach(() => {
+  ompAgentDir = mkdtempSync(join(tmpdir(), 'cez-omp-agent-'));
+  writeFileSync(join(ompAgentDir, 'agent.db'), '');
+  process.env.PI_CODING_AGENT_DIR = ompAgentDir;
   delete process.env.CEZ_AGENT_MODELS_LOCKED;
   delete process.env.CEZ_DRY_RUN;
   delete process.env.CEZ_CLAUDE_BIN;
@@ -76,6 +91,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  rmSync(ompAgentDir, { recursive: true, force: true });
   for (const [key, value] of Object.entries(originalEnv)) {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
@@ -1364,5 +1380,57 @@ describe('ProviderAuthService', () => {
       expect(new ProviderAuthService({ platform: 'linux' }).loginCommand('opencode', '/oc-work'))
         .toBe("'opencode' auth login");
     });
+  });
+});
+
+describe('omp credential discovery', () => {
+  /** The provider-key families `ompHasConfiguredCredential` recognises (mirrors OMP_CREDENTIAL_PREFIXES). */
+  const KEY_PREFIXES = ['OPENAI_', 'ANTHROPIC_', 'AZURE_OPENAI_', 'OPENROUTER_', 'GROQ_', 'MISTRAL_', 'GEMINI_', 'GOOGLE_GENERATIVE_AI_', 'DEEPSEEK_', 'XAI_', 'PERPLEXITY_', 'TOGETHER_'];
+  let strippedKeys: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    // No file-shaped evidence and no provider key: the host's own keys must not leak in.
+    rmSync(join(ompAgentDir, 'agent.db'), { force: true });
+    strippedKeys = {};
+    for (const name of Object.keys(process.env)) {
+      if (KEY_PREFIXES.some((prefix) => name.toUpperCase().startsWith(prefix))) {
+        strippedKeys[name] = process.env[name];
+        delete process.env[name];
+      }
+    }
+  });
+  afterEach(() => {
+    for (const [name, value] of Object.entries(strippedKeys)) {
+      if (value !== undefined) process.env[name] = value;
+    }
+  });
+
+  it('is unknown — never disconnected — with the login hint when no credential is visible', async () => {
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner() }));
+    expect(rows.omp!.status).toBe('unknown');
+    expect(rows.omp!.hint).toMatch(/run `omp` once and log in/);
+  });
+
+  it('is connected on the agent.db a native login leaves in the active agent dir', async () => {
+    writeFileSync(join(ompAgentDir, 'agent.db'), '');
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner() }));
+    expect(rows.omp).toEqual({ status: 'connected', hint: undefined });
+  });
+
+  it('is connected on a NON-EMPTY provider key, and a key that is set but empty is no credential', async () => {
+    process.env.OPENROUTER_API_KEY = '';
+    expect((await statuses(new ProviderAuthService({ runCommand: runner() }))).omp!.status).toBe('unknown');
+    process.env.OPENROUTER_API_KEY = 'sk-or-test';
+    expect((await statuses(new ProviderAuthService({ runCommand: runner() }))).omp!.status).toBe('connected');
+  });
+
+  it('is not-installed with the install hint when the CLI is absent', async () => {
+    const rows = await statuses(new ProviderAuthService({
+      runCommand: runner((executable) => executable === 'omp'
+        ? { stdout: '', stderr: '', exitCode: null, errorCode: 'ENOENT' }
+        : resultFor(executable)),
+    }));
+    expect(rows.omp!.status).toBe('not-installed');
+    expect(rows.omp!.hint).toMatch(/Install OMP/);
   });
 });

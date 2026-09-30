@@ -6,6 +6,7 @@ import { isSignalTerminationExit, trackChildExit } from './agent-runner.ts';
 import type { AgentToolCallRecord } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { readNdjson } from './ndjson.ts';
+import { V1TextCoalescer } from './v1-text-coalescer.ts';
 import { createOmpUiState, mapOmpRpcMessage, ompTurnStarted, type OmpUiMapperState } from './omp-ui-mapper.ts';
 
 const DEFAULT_TIMEOUT_MS = 30 * 60_000;
@@ -91,6 +92,14 @@ export class OmpRpcRunner implements AgentRunner {
     let weClosed = false;
     let ompUi: OmpUiMapperState = createOmpUiState();
     const textChunks: string[] = [];
+    // OMP streams `text_delta`s with no stable message id. v1 `text` must be the WHOLE message
+    // (the run manager joins v1 blocks with newlines before it looks for `CEZ:DONE`, so a marker
+    // split across deltas — `CEZ:D` + `ONE` — would never match and every turn would be nudged);
+    // v2 still streams the deltas.
+    const textCoalescer = new V1TextCoalescer((text) => {
+      textChunks.push(text);
+      onEvent?.({ type: 'text', text });
+    });
     const toolCalls: AgentToolCallRecord[] = [];
     let sessionId = spec.sessionId;
     let tokensUsed = 0;
@@ -233,10 +242,10 @@ export class OmpRpcRunner implements AgentRunner {
           } else if (value.type === 'message_update' && isRecord(value.assistantMessageEvent)) {
             const update = value.assistantMessageEvent;
             if (update.type === 'text_delta' && typeof update.delta === 'string') {
-              textChunks.push(update.delta);
-              onEvent?.({ type: 'text', text: update.delta });
+              textCoalescer.append(undefined, update.delta);
             }
           } else if (value.type === 'message_end' && isRecord(value.message) && value.message.role === 'assistant') {
+            textCoalescer.complete(undefined, contentText(value.message.content));
             const usage = usageValues(value.message.usage);
             if (usage) {
               tokensUsed += usage.weighted;
@@ -263,6 +272,7 @@ export class OmpRpcRunner implements AgentRunner {
               emitImages(resultValue.content, onEvent);
             }
           } else if (value.type === 'prompt_result') {
+            textCoalescer.flush();
             settled = true;
             onEvent?.({ type: 'turn-end' });
             if (value.status === 'error' && isRecord(value.error)) {
@@ -292,6 +302,8 @@ export class OmpRpcRunner implements AgentRunner {
         clearTimeout(settleGraceTimer);
         clearTimeout(killTimer);
         open = false;
+        // EOF, abort and timeout may leave a message without message_end.
+        textCoalescer.flush();
       }
 
       const exitCode = await waitForExit(child);

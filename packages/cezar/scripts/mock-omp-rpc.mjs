@@ -107,7 +107,12 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     send({
       type: 'message_update',
       messageId,
-      assistantMessageEvent: { type: 'text_delta', contentIndex: 2, delta: `Investigating: ${command.message}`, partial: {} },
+      assistantMessageEvent: { type: 'text_delta', contentIndex: 2, delta: 'Investigating: ', partial: {} },
+    });
+    send({
+      type: 'message_update',
+      messageId,
+      assistantMessageEvent: { type: 'text_delta', contentIndex: 2, delta: `${command.message}`, partial: {} },
     });
     send({
       type: 'message_update',

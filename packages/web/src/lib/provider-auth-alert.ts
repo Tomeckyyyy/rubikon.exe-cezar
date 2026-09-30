@@ -3,8 +3,9 @@ import type {
   ProviderStatusResponse,
   WorkspaceUiState,
 } from '@open-mercato/cezar-api-client'
+import { runnerSchema } from '@open-mercato/cezar-api-client'
 
-const PROVIDERS: readonly ProviderId[] = ['claude', 'codex', 'opencode', 'cursor', 'pi']
+const PROVIDERS: readonly ProviderId[] = runnerSchema.options
 const LABELS: Record<ProviderId, string> = {
   claude: 'Claude Code',
   codex: 'Codex',

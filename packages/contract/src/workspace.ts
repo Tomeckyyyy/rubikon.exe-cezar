@@ -410,6 +410,7 @@ export const setConfigInputSchema = z.object({
       opencode: z.string().trim().max(200).nullable().optional(),
       cursor: z.string().trim().max(200).nullable().optional(),
       pi: z.string().trim().max(200).nullable().optional(),
+      omp: z.string().trim().max(200).nullable().optional(),
     })
     .optional(),
   maxParallel: z.number().int().min(1).max(16).optional(),
