@@ -73,6 +73,12 @@ describe('a dry-run omp session emits normalized AgentEvents', () => {
 
     const types = events.map((e) => e.type);
     expect(types).toContain('text');
+    // v1 text is the WHOLE assistant message even though the mock streams it as two deltas: the
+    // run manager joins v1 blocks with newlines before matching `CEZ:DONE`, so per-delta text
+    // events would split the marker and every turn would be nudged to continue.
+    expect(events.filter((e) => e.type === 'text').map((e) => e.text)).toEqual([
+      'Investigating: investigate the login redirect bug',
+    ]);
     expect(types).toContain('tool-call');
     expect(types).toContain('tool-result');
     // Every backend's stream is terminated by exactly one `done`.
