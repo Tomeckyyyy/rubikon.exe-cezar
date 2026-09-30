@@ -4,6 +4,7 @@ import { posix, resolve, win32 } from 'node:path';
 import { z } from 'zod';
 import { DEFAULT_AGENT_ACCOUNT_ID } from '@open-mercato/cezar-contract';
 import { PROVIDER_IDS, type ProviderId } from '../core/provider-auth.ts';
+import { perRunner } from '@open-mercato/cezar-contract';
 import { supportsProfiles } from '../core/agent-profiles.ts';
 import { agentAccountsPath, workspaceConfigPath } from '../paths.ts';
 import { atomicWriteJsonSync } from './config.ts';
@@ -126,8 +127,8 @@ const selectionSchema = z
     opencode: z.string().max(64).optional().catch(undefined),
     cursor: z.string().max(64).optional().catch(undefined),
     pi: z.string().max(64).optional().catch(undefined),
-  })
-  .passthrough();
+    gemini: z.string().max(64).optional().catch(undefined),
+  })  .passthrough();
 
 export type AgentAccountSelection = z.infer<typeof selectionSchema>;
 

@@ -38,6 +38,8 @@ const CONNECTED_OUTPUT: Record<ProviderId, string> = {
     userInfo: { email: 'dev@example.com' },
   }),
   pi: 'provider  model  context  max-out  thinking  images\nanthropic  claude  200K  64K  yes  yes',
+  // `gemini --version`; connected-ness comes from the credentials it can see (gemini-credentials.ts).
+  gemini: '0.60.0',
 };
 
 const DISCONNECTED_OUTPUT: Record<ProviderId, string> = {
@@ -52,11 +54,13 @@ const DISCONNECTED_OUTPUT: Record<ProviderId, string> = {
     isAuthenticated: false,
   }),
   pi: 'No models available. Use /login to authenticate.',
+  gemini: '0.60.0',
 };
 
 const providerForExecutable = (executable: string): ProviderId => {
   if (executable === 'claude' || executable === 'codex' || executable === 'opencode' || executable === 'pi') return executable;
   if (executable === 'agent') return 'cursor';
+  if (executable === 'gemini') return 'gemini';
   throw new Error(`unexpected executable: ${executable}`);
 };
 
@@ -80,6 +84,7 @@ describe('workspace provider API', () => {
   const savedModelsLocked = process.env.CEZ_AGENT_MODELS_LOCKED;
   const savedDryRun = process.env.CEZ_DRY_RUN;
   const savedRemote = process.env.CEZ_REMOTE;
+  const savedGeminiKey = process.env.GEMINI_API_KEY;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'cez-providers-api-'));
@@ -87,6 +92,9 @@ describe('workspace provider API', () => {
     delete process.env.CEZ_AGENT_MODELS_LOCKED;
     delete process.env.CEZ_DRY_RUN;
     delete process.env.CEZ_REMOTE;
+    // Gemini's connected-ness is an environment read, not a probe output: give it a key so the
+    // stubbed "every provider connected" host really is one.
+    process.env.GEMINI_API_KEY = 'AIza-test-key';
   });
 
   afterEach(() => {
@@ -98,6 +106,8 @@ describe('workspace provider API', () => {
     else process.env.CEZ_DRY_RUN = savedDryRun;
     if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
     else process.env.CEZ_REMOTE = savedRemote;
+    if (savedGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
+    else process.env.GEMINI_API_KEY = savedGeminiKey;
   });
 
   const service = (
@@ -184,6 +194,7 @@ describe('workspace provider API', () => {
         },
         { provider: 'cursor', status: 'connected', enabled: true },
         { provider: 'pi', status: 'connected', enabled: true },
+        { provider: 'gemini', status: 'connected', enabled: true },
       ],
     });
   });
@@ -205,6 +216,7 @@ describe('workspace provider API', () => {
         { provider: 'opencode', status: 'connected', enabled: true },
         { provider: 'cursor', status: 'connected', enabled: true },
         { provider: 'pi', status: 'connected', enabled: true },
+        { provider: 'gemini', status: 'connected', enabled: true },
       ],
     });
     expect(runCommand).not.toHaveBeenCalled();
@@ -307,7 +319,7 @@ describe('workspace provider API', () => {
     await apiRequest(server, '/api/v1/providers/status');
     await apiRequest(server, '/api/v1/providers/status?refresh=1');
 
-    expect(runCommand).toHaveBeenCalledTimes(10);
+    expect(runCommand).toHaveBeenCalledTimes(12);
   });
 
   it('GET without refresh reuses the completed provider cache', async () => {
@@ -321,7 +333,7 @@ describe('workspace provider API', () => {
     await apiRequest(server, '/api/v1/providers/status');
     await apiRequest(server, '/api/v1/providers/status');
 
-    expect(runCommand).toHaveBeenCalledTimes(5);
+    expect(runCommand).toHaveBeenCalledTimes(6);
   });
 
   it('POST /api/v1/providers/:provider/retry clears only the current incident without enabling a disabled provider', async () => {
@@ -510,7 +522,7 @@ describe('workspace provider API', () => {
     const openTerminal = vi.fn(async () => true);
     const pending = connect(app({ providerAuth, openTerminal }), 'claude');
 
-    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(5));
+    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6));
     providerAuth.reportRuntimeAuthFailure('claude');
     release();
 

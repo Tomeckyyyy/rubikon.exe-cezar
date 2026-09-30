@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { providerIdSchema, providerStatusSchema } from './workspace.ts';
+import { perRunner } from './runners.ts';
 
 /**
  * Agent profiles — extra config dirs for a SECOND login of the same agent CLI
@@ -101,6 +102,7 @@ export const agentAccountSelectionSchema = z.object({
   opencode: z.string().optional(),
   cursor: z.string().optional(),
   pi: z.string().optional(),
+  gemini: z.string().optional(),
 });
 export type AgentAccountSelection = z.infer<typeof agentAccountSelectionSchema>;
 
