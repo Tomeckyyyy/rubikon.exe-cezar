@@ -1049,7 +1049,10 @@ export class RunManager {
     this.dataDir = join(repoRoot, '.ai/cezar');
     this.projectId = options.projectId;
     this.resolveTrackerEnv = options.resolveTrackerEnv;
-    this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
+    // A fallback for headless/tests only; boot always injects the shared workspace semaphore. It
+    // must not register as the telemetry readout's provider: the slot is last-writer-wins, and a
+    // per-manager fallback with no ceiling would blank the real semaphore's `admission` key.
+    this.semaphore = options.semaphore ?? new WorkspaceSemaphore({ registersAdmissionStatus: false });
     this.offSemaphore = this.semaphore.register({
       busySlots: () => this.busySlots(),
       dispatchBusy: () => this.dispatchBusy(),
@@ -1451,8 +1454,11 @@ export class RunManager {
         const repo = await getRepoInfo(this.repoRoot);
         const maxParallel = this.semaphore.maxParallel();
         // Cached dispatch-admission ceiling (null/0 = no cap) — read once per sweep, like the
-        // workspace cap above; `startable()` is the only consumer.
-        const dispatchCap = this.semaphore.dispatchMaxConcurrent();
+        // workspace cap above; `startable()` is the only consumer. The GOVERNED ceiling: the
+        // configured one reduced by the adaptive admission governor while the machine is under
+        // pressure (spec 2026-09-20-adaptive-admission-governor). `dispatchMaxConcurrent()` still
+        // answers the configured value for the settings API.
+        const dispatchCap = this.semaphore.dispatchAdmissionCeiling();
         // Per-project ceiling (spec 2026-07-22-per-project-concurrency): this
         // project never runs more than its own configured `maxParallel`; absent
         // an override it equals the workspace cap, so behavior is unchanged.
