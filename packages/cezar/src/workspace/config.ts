@@ -146,15 +146,8 @@ const composerDefaultsSchema = z
 const agentDefaultsSchema = z
   .object({
     runner: z.enum(PROVIDER_IDS).optional().catch(undefined),
-models: z
-      .object({
-        claude: z.string().trim().min(1).max(200).optional().catch(undefined),
-        codex: z.string().trim().min(1).max(200).optional().catch(undefined),
-        opencode: z.string().trim().min(1).max(200).optional().catch(undefined),
-        cursor: z.string().trim().min(1).max(200).optional().catch(undefined),
-        pi: z.string().trim().min(1).max(200).optional().catch(undefined),
-        gemini: z.string().trim().min(1).max(200).optional().catch(undefined),
-      })      .passthrough()
+    models: perRunner(z.string().trim().min(1).max(200).optional().catch(undefined))
+      .passthrough()
       .optional()
       .catch(undefined),
   })

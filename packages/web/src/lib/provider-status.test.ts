@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { RUNNER_IDS } from '@open-mercato/cezar-api-client'
 import type { ProviderStatusResponse } from '@open-mercato/cezar-api-client'
 import {
   applyProviderStatusRow,
@@ -221,6 +222,14 @@ describe('parseProviderStatusResponse', () => {
         { provider: 'cursor', status: 'not-installed', enabled: true },
       ],
     })
+  })
+
+  // The server answers with one row per runner; a runner the parser does not know fails the
+  // whole response, which shows every provider as "Could not verify".
+  it('accepts a row for every runner in the contract', () => {
+    const providers = RUNNER_IDS.map((provider) => ({ provider, status: 'connected', enabled: true }))
+    expect(parseProviderStatusResponse({ providers: [...providers].reverse() })).toEqual({ providers })
+    expect(usableRunners({ providers } as ProviderStatusResponse)).toEqual(RUNNER_IDS)
   })
 
   it.each([

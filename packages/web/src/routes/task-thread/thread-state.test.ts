@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { RUNNER_IDS } from '@open-mercato/cezar-api-client'
 import type { RunEvent } from '@open-mercato/cezar-api-client'
 import type { UiMessageItem, UiToolItem } from '@open-mercato/cezar-api-client'
 
@@ -589,6 +590,17 @@ describe('reduceThread — provider authorization recovery', () => {
       kind: 'provider-auth-required',
       id: 'v1:1',
       provider: 'claude',
+      authFailureId: 'incident-1',
+    }])
+  })
+
+  it.each(RUNNER_IDS)('persists an incident for the %s runner', (provider) => {
+    expect(reduceThread([
+      line(1, 'provider-auth-required', { provider, authFailureId: 'incident-1' }),
+    ]).turns[0]?.items).toEqual([{
+      kind: 'provider-auth-required',
+      id: 'v1:1',
+      provider,
       authFailureId: 'incident-1',
     }])
   })
