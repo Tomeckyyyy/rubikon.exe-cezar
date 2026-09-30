@@ -1,7 +1,9 @@
 import { RUNNER_IDS } from '@open-mercato/cezar-api-client'
 import type { ProviderStatus, ProviderStatusResponse, Runner } from '@open-mercato/cezar-api-client'
 
-const RUNNER_ORDER: readonly Runner[] = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'gemini']
+// Contract-derived, never hand-listed: a runner missing here makes every real status response
+// fail to parse (the server always sends a row per runner), so no provider can be verified.
+const RUNNER_ORDER: readonly Runner[] = RUNNER_IDS
 const PROVIDER_STATES = new Set(['connected', 'disconnected', 'not-installed', 'unknown'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -377,8 +377,8 @@ function DefaultAgentField({
       title={hasAccounts ? 'Default agent' : 'Default runner'}
       hint={
         hasAccounts
-          ? 'Preselected for new tasks in THIS repo, and used by the chain planner. Each task can still pick another agent or account. The account is stored on this machine only — it is never committed, so a teammate keeps their own. The session can’t be resumed here once the pane moves on.'
-          : 'Preselected for new tasks in THIS repo, and used by the chain planner. Each task can still pick another agent or account. The account is stored on this machine only — it is never committed, so a teammate keeps their own. The session can’t be resumed here once the pane moves on.'
+          ? 'Preselected for new tasks in THIS repo, and used by the chain planner. Each task can still pick another agent or account. The account is stored on this machine only — it is never committed, so a teammate keeps their own.'
+          : 'Preselected for new tasks in THIS repo, and used by the chain planner. Each task can still pick another runner.'
       }
     >
       <DefaultAgentPicker

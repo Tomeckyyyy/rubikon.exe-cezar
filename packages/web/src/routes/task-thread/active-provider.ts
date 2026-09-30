@@ -9,7 +9,8 @@ const PROVIDER_LABEL: Record<Runner, string> = {
   cursor: 'Cursor',
   pi: 'pi',
   omp: 'OMP',
-  gemini: 'Gemini CLI',}
+  gemini: 'Gemini CLI',
+}
 
 /** Mirrors the server's providerForActiveRun for POST /runs/:id/messages. */
 export function providerForActiveRun(run: ApiRun): Runner {

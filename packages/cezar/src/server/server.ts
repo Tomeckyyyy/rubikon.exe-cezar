@@ -2016,6 +2016,7 @@ export function createApp(deps: ServerDeps) {
       ...(profile.provider === 'codex' ? { codex: profile.path } : {}),
       ...(profile.provider === 'opencode' ? { opencodeConfig: profile.path } : {}),
       ...(profile.provider === 'cursor' ? { cursor: profile.path } : {}),
+      ...(profile.provider === 'omp' ? { omp: profile.path } : {}),
     };
     const defs = listConfigFiles().filter(
       (def) => def.scope === 'user' && def.runners.includes(profile.provider),
@@ -3223,7 +3224,7 @@ export function createApp(deps: ServerDeps) {
     agentDefaults: z
       .object({
         runner: z.enum(PROVIDER_IDS).nullable().optional(),
-models: z
+        models: z
           .object({
             claude: z.string().trim().min(1).max(200).nullable().optional(),
             codex: z.string().trim().min(1).max(200).nullable().optional(),
@@ -3231,7 +3232,8 @@ models: z
             cursor: z.string().trim().min(1).max(200).nullable().optional(),
             pi: z.string().trim().min(1).max(200).nullable().optional(),
             omp: z.string().trim().min(1).max(200).nullable().optional(),
-            gemini: z.string().trim().min(1).max(200).nullable().optional(),          })
+            gemini: z.string().trim().min(1).max(200).nullable().optional(),
+          })
           .optional(),
       })
       .optional(),
@@ -6028,16 +6030,7 @@ models: z
     baseBranch: z.string().trim().min(1).max(200).nullable().optional(),
     defaultRunner: z.enum(RUNNER_IDS).optional(),
     systemPrompt: z.string().trim().max(20_000, 'must be at most 20000 characters').nullable().optional(),
-    defaultModels: z
-      .object({
-        claude: modelPresetSchema,
-        codex: modelPresetSchema,
-        opencode: modelPresetSchema,
-        cursor: modelPresetSchema,
-        pi: modelPresetSchema,
-        gemini: modelPresetSchema,
-      })
-      .optional(),
+    defaultModels: perRunner(modelPresetSchema).optional(),
     // Concurrency + memory guard (Settings → Resources). maxParallel clamps to
     // the schema's 1–16; memoryLimitMb null/0 clears the ceiling.
     maxParallel: z.number().int().min(1).max(16).optional(),
@@ -6713,7 +6706,8 @@ export function resumeCommand(runner: string | undefined, sessionId: string): st
       return `omp --resume ${sessionId}`;
     case 'gemini':
       // The ACP session id is the id of Gemini's own chat recording, which `--resume` accepts.
-      return `gemini --resume ${sessionId}`;    default:
+      return `gemini --resume ${sessionId}`;
+    default:
       return null;
   }
 }

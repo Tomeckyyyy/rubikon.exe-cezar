@@ -43,7 +43,8 @@ import type { ProviderId } from './provider-auth.ts';
  *   `config.yml`, the auth store (`agent.db`), `AGENTS.md`, `mcp.json` — so credentials move too.
  * - **gemini** → `null` for now (spec 2026-09-19 Q14). `GEMINI_CLI_HOME` relocates `.gemini`, but
  *   on 2026-09-19 a fresh `GEMINI_CLI_HOME` (and even a fresh `HOME`) still authenticated with the
- *   stored API key (`__fixtures__/gemini/README.md`), so it does not provably move credentials. */
+ *   stored API key (`__fixtures__/gemini/README.md`), so it does not provably move credentials.
+ */
 export const PROFILE_ENV_VAR: Record<ProviderId, string | null> = {
   claude: 'CLAUDE_CONFIG_DIR',
   codex: 'CODEX_HOME',
@@ -51,7 +52,8 @@ export const PROFILE_ENV_VAR: Record<ProviderId, string | null> = {
   cursor: null,
   pi: null,
   omp: 'PI_CODING_AGENT_DIR',
-  gemini: null,};
+  gemini: null,
+};
 
 /** Providers that can carry more than one account — what the UI offers "Add account" for. */
 export const PROFILE_CAPABLE_PROVIDERS: readonly ProviderId[] = (
@@ -108,4 +110,5 @@ const PROFILE_DIR_MARKERS: Record<ProviderId, readonly string[]> = {
   // `PI_CODING_AGENT_DIR` moves the whole base; `config.yml` + `agent.db` are its signature files.
   omp: ['config.yml', 'agent.db'],
   // Same as pi: `PROFILE_ENV_VAR.gemini === null`, kept only for exhaustiveness.
-  gemini: [],};
+  gemini: [],
+};

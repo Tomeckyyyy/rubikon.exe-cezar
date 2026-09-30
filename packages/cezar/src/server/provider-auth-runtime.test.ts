@@ -39,10 +39,11 @@ const CONNECTED_OUTPUT: Record<ProviderId, string> = {
   pi: 'provider  model  context  max-out  thinking  images\nanthropic  claude  200K  64K  yes  yes',
   omp: '18.4.2',
   // `gemini --version`; connected-ness comes from the credentials it can see (gemini-credentials.ts).
-  gemini: '0.60.0',};
+  gemini: '0.60.0',
+};
 
 const providerForExecutable = (executable: string): ProviderId => {
-  if (executable === 'claude' || executable === 'codex' || executable === 'opencode' || executable === 'pi') return executable;
+  if (executable === 'claude' || executable === 'codex' || executable === 'opencode' || executable === 'pi' || executable === 'omp') return executable;
   if (executable === 'agent') return 'cursor';
   if (executable === 'gemini') return 'gemini';
   throw new Error(`unexpected executable: ${executable}`);

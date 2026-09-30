@@ -59,14 +59,15 @@ export const workspaceConfigResponseSchema = z.object({
    */
   agentDefaults: z.object({
     runner: runnerSchema.optional(),
-models: z.object({
+    models: z.object({
       claude: z.string().optional(),
       codex: z.string().optional(),
       opencode: z.string().optional(),
       cursor: z.string().optional(),
       pi: z.string().optional(),
       omp: z.string().optional(),
-      gemini: z.string().optional(),    }).optional(),
+      gemini: z.string().optional(),
+    }).optional(),
   }),
 });
 export type WorkspaceConfigResponse = z.infer<typeof workspaceConfigResponseSchema>;
@@ -93,7 +94,7 @@ export const setWorkspaceConfigInputSchema = z.object({
   agentDefaults: z
     .object({
       runner: runnerSchema.nullable().optional(),
-models: z
+      models: z
         .object({
           claude: z.string().trim().min(1).max(200).nullable().optional(),
           codex: z.string().trim().min(1).max(200).nullable().optional(),
@@ -101,7 +102,8 @@ models: z
           cursor: z.string().trim().min(1).max(200).nullable().optional(),
           pi: z.string().trim().min(1).max(200).nullable().optional(),
           omp: z.string().trim().min(1).max(200).nullable().optional(),
-          gemini: z.string().trim().min(1).max(200).nullable().optional(),        })
+          gemini: z.string().trim().min(1).max(200).nullable().optional(),
+        })
         .optional(),
     })
     .optional(),
@@ -257,7 +259,7 @@ export const workspaceUiStateSchema = z.looseObject({
   /** Dismissed runtime-auth incident IDs, keyed by provider. An ID is only dismissed until the
    *  provider reports a different incident, so this stays workspace-global with the browser
    *  rather than one project checkout. */
-dismissedProviderAuthFailures: z
+  dismissedProviderAuthFailures: z
     .object({
       claude: z.string().optional(),
       codex: z.string().optional(),
@@ -265,7 +267,8 @@ dismissedProviderAuthFailures: z
       cursor: z.string().optional(),
       pi: z.string().optional(),
       omp: z.string().optional(),
-      gemini: z.string().optional(),    })
+      gemini: z.string().optional(),
+    })
     .optional(),
   /** Settings → Appearance, GLOBAL since step 3.5: accent + density describe the person at the
    *  keyboard, not a repo. */
@@ -358,7 +361,8 @@ export const runnerModelsSchema = z.object({
   cursor: z.string().optional(),
   pi: z.string().optional(),
   omp: z.string().optional(),
-  gemini: z.string().optional(),});
+  gemini: z.string().optional(),
+});
 export type RunnerModels = z.infer<typeof runnerModelsSchema>;
 
 /** `GET /api/v1/config` — every Settings → Agents knob in one read. */
@@ -399,16 +403,7 @@ export const setConfigInputSchema = z.object({
   baseBranch: z.string().trim().min(1).max(200).nullable().optional(),
   defaultRunner: runnerSchema.optional(),
   systemPrompt: z.string().trim().max(20_000).nullable().optional(),
-defaultModels: z
-    .object({
-      claude: z.string().trim().max(200).nullable().optional(),
-      codex: z.string().trim().max(200).nullable().optional(),
-      opencode: z.string().trim().max(200).nullable().optional(),
-      cursor: z.string().trim().max(200).nullable().optional(),
-      pi: z.string().trim().max(200).nullable().optional(),
-      gemini: z.string().trim().max(200).nullable().optional(),
-    })
-    .optional(),
+  defaultModels: perRunner(z.string().trim().max(200).nullable().optional()).optional(),
   maxParallel: z.number().int().min(1).max(16).optional(),
   /** null or 0 clears the ceiling back to "no limit". */
   memoryLimitMb: z.number().int().min(0).max(1_048_576).nullable().optional(),

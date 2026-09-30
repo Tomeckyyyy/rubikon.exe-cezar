@@ -255,7 +255,8 @@ const BACKEND_ALLOW_NAMES: Partial<Record<AgentBackend, ReadonlySet<string>>> = 
     'GOOGLE_GENAI_USE_VERTEXAI',
     'GOOGLE_GENAI_USE_GCA',
     'GOOGLE_GEMINI_BASE_URL',
-  ]),};
+  ]),
+};
 
 
 /** `gh` handoff (draft PRs) works in every backend — the one credential the

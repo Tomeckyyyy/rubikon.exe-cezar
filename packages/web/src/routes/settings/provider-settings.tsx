@@ -29,9 +29,10 @@ const PROVIDERS: ReadonlyArray<{ id: ProviderId; label: string; login: string; e
   { id: 'pi', label: 'pi', login: 'pi /login' },
   // omp's auth lives in its own agent.db; `unknown` means "no credential cezar can see" and the
   // hint points at the interactive CLI.
-  { id: 'omp', label: 'OMP', login: 'omp' },
+  { id: 'omp', label: 'OMP', login: 'omp', explainsUnknown: true },
   // No login subcommand: `/auth` inside the interactive CLI, or GEMINI_API_KEY in the environment.
-  { id: 'gemini', label: 'Gemini CLI', login: 'gemini', explainsUnknown: true },] as const
+  { id: 'gemini', label: 'Gemini CLI', login: 'gemini', explainsUnknown: true },
+] as const
 
 const providerWriteState = <T,>(value: T): Record<ProviderId, T> => ({
   claude: value,
@@ -41,7 +42,8 @@ const providerWriteState = <T,>(value: T): Record<ProviderId, T> => ({
   pi: value,
   omp: value,
 
-  gemini: value,})
+  gemini: value,
+})
 
 const STATUS_PRESENTATION = {
   connected: { label: 'Credentials found', tone: 'success' },

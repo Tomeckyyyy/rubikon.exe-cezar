@@ -125,7 +125,8 @@ describe('ProviderSettings', () => {
       [...document.querySelectorAll('[data-slot="provider-card"]')].map((item) =>
         item.querySelector('h3')?.textContent,
       ),
-    ).toEqual(['Claude Code', 'Codex', 'OpenCode', 'Cursor', 'pi', 'OMP', 'Gemini CLI'])  })
+    ).toEqual(['Claude Code', 'Codex', 'OpenCode', 'Cursor', 'pi', 'OMP', 'Gemini CLI'])
+  })
 
   it('presents discovery truth, enablement, and runtime recovery without hiding diagnostics', async () => {
     serve({

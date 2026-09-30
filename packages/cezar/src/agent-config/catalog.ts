@@ -33,12 +33,13 @@ export interface AgentHomePaths {
   codex: string;
   /** `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode` */
   opencodeConfig: string;
-/** `$CURSOR_CONFIG_DIR` or `~/.cursor` */
+  /** `$CURSOR_CONFIG_DIR` or `~/.cursor` */
   cursor: string;
   /** `$PI_CODING_AGENT_DIR` (the whole agent dir) or `~/.omp/agent` */
   omp: string;
   /** `$GEMINI_CLI_HOME/.gemini` or `~/.gemini` */
-  gemini: string;}
+  gemini: string;
+}
 
 export interface ConfigFileDef {
   /** Stable, opaque, URL-safe. The ONLY thing a client may name (traversal-proof). */

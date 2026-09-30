@@ -4,7 +4,7 @@
  * no token-budget circuit breaker, no zod response schemas — one run is one
  * agent-CLI session streaming normalized events.
  *
- * Five interchangeable backends implement this seam, each as a persistent
+ * Seven interchangeable backends implement this seam, each as a persistent
  * process so multi-turn follow-ups, `waiting`, interrupt and resume all work:
  *  - `claude`   — Claude Code CLI, stream-json over stdin/stdout;
  *  - `codex`    — `codex app-server`, JSON-RPC 2.0 (JSONL) over stdin/stdout;
@@ -12,7 +12,8 @@
  *  - `cursor`   — Cursor Agent CLI, headless print mode (`stream-json`);
  *  - `pi`       — pi coding CLI, RPC over JSONL stdin/stdout, selecting its
  *                 model with `provider/model`;
- *  - `omp`      — OMP, pi's successor, the same RPC line protocol over stdio.
+ *  - `omp`      — OMP, pi's successor, the same RPC line protocol over stdio;
+ *  - `gemini`   — Gemini CLI over the Agent Client Protocol (`gemini --acp`).
  */
 
 import type { UiEvent } from './ui-events.ts';

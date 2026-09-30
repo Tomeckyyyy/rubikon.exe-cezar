@@ -103,7 +103,8 @@ export const agentAccountSelectionSchema = z.object({
   cursor: z.string().optional(),
   pi: z.string().optional(),
   omp: z.string().optional(),
-  gemini: z.string().optional(),});
+  gemini: z.string().optional(),
+});
 export type AgentAccountSelection = z.infer<typeof agentAccountSelectionSchema>;
 
 /**

@@ -147,7 +147,8 @@ export const AGENT_DESCRIPTORS: AgentDescriptor[] = [
         'MCP',
         'Under the "mcpServers" key in settings.json — the same file as Gemini CLI’s settings.',
       ),
-      group('gemini', 'memory', 'Memory & instructions'),    ],
+      group('gemini', 'memory', 'Memory & instructions'),
+    ],
   },
 ]
 

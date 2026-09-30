@@ -69,7 +69,7 @@ const originalEnv = {
   CEZ_CODEX_BIN: process.env.CEZ_CODEX_BIN,
   CEZ_OPENCODE_BIN: process.env.CEZ_OPENCODE_BIN,
   CEZ_PI_BIN: process.env.CEZ_PI_BIN,
-CURSOR_API_KEY: process.env.CURSOR_API_KEY,
+  CURSOR_API_KEY: process.env.CURSOR_API_KEY,
 CEZ_GEMINI_BIN: process.env.CEZ_GEMINI_BIN,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   GEMINI_CLI_HOME: process.env.GEMINI_CLI_HOME,
@@ -609,7 +609,7 @@ describe('provider auth parsers', () => {
 });
 
 describe('ProviderAuthService', () => {
-it('always returns claude, codex, opencode, cursor, pi, gemini in descriptor order', async () => {
+  it('always returns claude, codex, opencode, cursor, pi, gemini in descriptor order', async () => {
     const service = new ProviderAuthService({ runCommand: runner() });
 
     await expect(service.status()).resolves.toMatchObject({
@@ -625,7 +625,7 @@ it('always returns claude, codex, opencode, cursor, pi, gemini in descriptor ord
     });
   });
 
-it('runs the six status commands concurrently with a 10 second timeout', async () => {
+  it('runs the seven status commands concurrently with a 10 second timeout', async () => {
     const calls: Array<{ executable: string; args: readonly string[]; timeoutMs: number }> = [];
     let release!: () => void;
     const waiting = new Promise<void>((resolve) => { release = resolve; });
@@ -1201,7 +1201,7 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
       .toBe('"C:\\Program Files\\op^%en^&co^!de^".exe" auth login');
   });
 
-it('reports every provider connected in CEZ_DRY_RUN without executing a command', async () => {
+  it('reports every provider connected in CEZ_DRY_RUN without executing a command', async () => {
     process.env.CEZ_DRY_RUN = '1';
     const runCommand = runner();
     const service = new ProviderAuthService({ runCommand });

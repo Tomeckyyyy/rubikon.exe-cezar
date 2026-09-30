@@ -96,7 +96,8 @@ const PROVIDER_LABEL: Record<ProviderId, string> = {
   cursor: 'Cursor',
   pi: 'pi',
   omp: 'OMP',
-  gemini: 'Gemini CLI',}
+  gemini: 'Gemini CLI',
+}
 
 /** The vendor's own install/login instruction, shown when the CLI is not on this machine. */
 const PROVIDER_INSTALL: Record<ProviderId, string> = {
@@ -106,7 +107,8 @@ const PROVIDER_INSTALL: Record<ProviderId, string> = {
   cursor: 'curl https://cursor.com/install -fsS | bash',
   pi: 'https://github.com/badlogic/pi-mono',
   omp: 'brew install can1357/tap/omp',
-  gemini: 'npm i -g @google/gemini-cli',}
+  gemini: 'npm i -g @google/gemini-cli',
+}
 
 /** Same vocabulary the Providers card uses — one wording for "is this logged in?". */
 const STATUS_PRESENTATION = {

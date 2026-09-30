@@ -14,7 +14,8 @@ const LABEL: Record<ProviderId, string> = {
   cursor: 'Cursor',
   pi: 'pi',
   omp: 'OMP',
-  gemini: 'Gemini CLI',};
+  gemini: 'Gemini CLI',
+};
 
 export function providersRequiredByWorkflow(
   workflow: WorkflowDef,

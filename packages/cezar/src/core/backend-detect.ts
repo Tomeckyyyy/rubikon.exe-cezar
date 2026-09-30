@@ -8,7 +8,7 @@ import { GEMINI_AUTH_HINT } from './gemini-ui-mapper.ts';
 const exec = promisify(execFile);
 
 export interface BackendCheck {
-name: 'claude' | 'codex' | 'opencode' | 'cursor' | 'pi' | 'gemini' | 'omp' | 'gh' | 'git';
+  name: 'claude' | 'codex' | 'opencode' | 'cursor' | 'pi' | 'gemini' | 'omp' | 'gh' | 'git';
   available: boolean;
   version?: string;
   hint?: string;

@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, readTestEnv } from './agent-browser'
+import { RUNNER_IDS } from '@open-mercato/cezar-api-client'
 
 /**
  * Settings → Agents (R6 Step 1.5) end-to-end against the shared dry-run environment: edit each
@@ -29,7 +30,6 @@ let baseUrl: string
 let previousConfig: string | null = null
 let modelsLocked = false
 
-const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi'] as const
 
 beforeAll(async () => {
   baseUrl = readTestEnv().baseUrl

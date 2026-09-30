@@ -73,7 +73,7 @@ interface ProviderDescriptor {
   loginArgs: readonly string[];
   installHint: string;
   parse: (result: ProviderCommandResult) => ProviderConnectionState | null;
-/**
+  /**
    * An answer available WITHOUT spawning the CLI at all, checked before `runCommand` — `undefined`
    * defers to the normal probe. Every other backend's own CLI self-reports API-key vs. subscription
    * auth in its status command (codex literally prints "logged in using an API key"), so nothing

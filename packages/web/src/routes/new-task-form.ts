@@ -55,7 +55,8 @@ export const RUNNERS: readonly RunnerOption[] = [
   { id: 'cursor', label: 'cursor', desc: 'Cursor Agent CLI' },
   { id: 'pi', label: 'pi', desc: 'pi CLI (provider/model)' },
   { id: 'omp', label: 'omp', desc: 'OMP (RPC)' },
-  { id: 'gemini', label: 'gemini', desc: 'Gemini CLI (ACP)' },]
+  { id: 'gemini', label: 'gemini', desc: 'Gemini CLI (ACP)' },
+]
 
 export interface ModelPreset {
   id: string

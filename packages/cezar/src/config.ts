@@ -91,7 +91,7 @@ const configSchema = z.object({
    * `.catch(undefined)` keeps the key additive-safe like `systemPrompt`: a
    * bad value degrades to unset without discarding the rest of the config.
    */
-defaultModels: z
+  defaultModels: z
     .object({
       claude: z.string().trim().min(1).max(200).optional(),
       codex: z.string().trim().min(1).max(200).optional(),

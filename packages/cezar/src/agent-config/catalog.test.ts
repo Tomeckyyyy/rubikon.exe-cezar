@@ -24,7 +24,7 @@ describe('agent-config catalog', () => {
     }
   });
 
-  it('<repo>/AGENTS.md is ONE entry read by three runners', () => {
+  it('<repo>/AGENTS.md is ONE entry read by four runners', () => {
     const agents = CONFIG_FILES.filter((f) => f.label === 'AGENTS.md' && f.scope === 'project');
     expect(agents).toHaveLength(1);
     expect(agents[0]!.runners).toEqual(['codex', 'opencode', 'omp', 'gemini']);
@@ -69,7 +69,7 @@ describe('agent-config catalog', () => {
       'claude.project.mcp',
       'codex.project.config',
       'codex.user.config',
-'cursor.project.mcp',
+      'cursor.project.mcp',
       'cursor.user.mcp',
       'gemini.project.settings',
       'gemini.user.settings',
