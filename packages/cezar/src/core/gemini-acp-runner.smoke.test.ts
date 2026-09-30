@@ -10,12 +10,12 @@ import type { UiEvent } from './ui-events.ts';
 
 /**
  * OPT-IN smoke against the REAL Gemini CLI (#581 Phase 2 Step 7). It spends two model requests, so
- * it never runs by default: set `GEMINI_REAL_SMOKE=1` and a `GEMINI_API_KEY` (a free key serves the
+ * it never runs by default: set `CEZ_GEMINI_SMOKE=1` and a `GEMINI_API_KEY` (a free key serves the
  * Flash models; `GEMINI_SMOKE_MODEL` overrides the default Flash id), then
- * `GEMINI_REAL_SMOKE=1 GEMINI_API_KEY=… npm test -- packages/cezar/src/core/gemini-acp-runner.smoke.test.ts`.
+ * `CEZ_GEMINI_SMOKE=1 GEMINI_API_KEY=… npm test -- packages/cezar/src/core/gemini-acp-runner.smoke.test.ts`.
  * Without both it is skipped, never failed.
  */
-const enabled = process.env.GEMINI_REAL_SMOKE === '1' && Boolean(process.env.GEMINI_API_KEY);
+const enabled = process.env.CEZ_GEMINI_SMOKE === '1' && Boolean(process.env.GEMINI_API_KEY);
 const model = process.env.GEMINI_SMOKE_MODEL ?? 'gemini-3-flash-preview';
 
 describe.skipIf(!enabled)('gemini runner against the real `gemini --acp` (opt-in)', () => {

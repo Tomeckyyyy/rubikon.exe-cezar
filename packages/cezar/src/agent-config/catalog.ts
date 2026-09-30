@@ -348,7 +348,7 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     docsUrl: CURSOR_CLI_CONFIG_DOCS,
   },
 
-// ---- Gemini CLI ----
+  // ---- Gemini CLI ----
   {
     id: 'gemini.user.settings',
     runners: ['gemini'],

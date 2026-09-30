@@ -69,7 +69,7 @@ const originalEnv = {
   CEZ_OPENCODE_BIN: process.env.CEZ_OPENCODE_BIN,
   CEZ_PI_BIN: process.env.CEZ_PI_BIN,
   CURSOR_API_KEY: process.env.CURSOR_API_KEY,
-CEZ_GEMINI_BIN: process.env.CEZ_GEMINI_BIN,
+  CEZ_GEMINI_BIN: process.env.CEZ_GEMINI_BIN,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   GEMINI_CLI_HOME: process.env.GEMINI_CLI_HOME,
 };
@@ -84,7 +84,7 @@ beforeEach(() => {
   delete process.env.CURSOR_API_KEY;
   delete process.env.CEZ_GEMINI_BIN;
   // Gemini's connected-ness is an environment read (the setup file strips the host's): give every
-  // case a key so "all connected" still means all five. The gemini block below removes it.
+  // case a key so "all connected" still means every provider. The gemini block below removes it.
   process.env.GEMINI_API_KEY = 'AIza-test-key';
 });
 

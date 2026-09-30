@@ -446,7 +446,7 @@ export function useRunnerModelCatalogs(
   const opencode = useRunnerModels('opencode', enabled)
   const cursor = useRunnerModels('cursor', enabled)
   const pi = useRunnerModels('pi', enabled)
-const gemini = useRunnerModels('gemini', enabled)
+  const gemini = useRunnerModels('gemini', enabled)
   return { claude, codex, opencode, cursor, pi, gemini }
 }
 
