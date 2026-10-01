@@ -25,7 +25,7 @@ import {
   geminiDialect,
   isGeminiAuthFailure,
 } from './gemini-ui-mapper.ts';
-import { geminiResumeWaitMs } from './gemini-sessions.ts';
+import { geminiResumeWaitMs, pruneGeminiResumeShells } from './gemini-sessions.ts';
 import type { UiEvent } from './ui-events.ts';
 
 const DEFAULT_TIMEOUT_MS = 30 * 60_000;
@@ -148,6 +148,9 @@ class GeminiAcpSession implements AgentSession {
     private readonly opts: SessionOptions,
   ) {
     this.childEnv = buildGeminiEnv(backend, spec.env);
+    // Upstream bug: Gemini CLI deletes a session's history at STARTUP when an earlier resume left
+    // a shell recording beside it (gemini-sessions.ts) — so the shell goes before the child exists.
+    if (spec.resume && spec.sessionId) pruneGeminiResumeShells(spec.sessionId, this.childEnv);
     this.child = nodeSpawn(bin, buildGeminiArgs(spec), { cwd: spec.cwd, env: this.childEnv });
     this.pid = this.child.pid;
     this.hasExited = trackChildExit(this.child);
@@ -220,6 +223,9 @@ class GeminiAcpSession implements AgentSession {
 
     await reading;
     const exitCode = await exited;
+    // The same guard on the way out: the shell this run's own `session/load` left must not wait
+    // for the next Continue — any other Gemini process in this project would delete the history.
+    if (this.acpSessionId) pruneGeminiResumeShells(this.acpSessionId, this.childEnv);
     for (const timer of this.timers) clearTimeout(timer);
     if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
     this.isOpen = false;
