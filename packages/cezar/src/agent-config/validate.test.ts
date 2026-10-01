@@ -51,6 +51,20 @@ describe('validateConfig', () => {
     expect(validateConfig('key = = 1', 'toml').ok).toBe(false);
   });
 
+  it('yaml: the real parser accepts what omp writes and refuses what omp could not read', () => {
+    // Valid full-YAML constructs a subset parser would refuse.
+    expect(validateConfig('---\nmodelRoles:\n  default: openrouter/deepseek/deepseek-v4-flash\n', 'yaml').ok).toBe(true);
+    expect(validateConfig('systemPrompt: |\n  Be terse.\n  Cite files.\nsetupVersion: 2\n', 'yaml').ok).toBe(true);
+    expect(validateConfig('base: &b\n  x: 1\nderived:\n  <<: *b\n', 'yaml').ok).toBe(true);
+    expect(validateConfig('providers:\n  - openrouter\n  - anthropic\n', 'yaml').ok).toBe(true);
+    // Malformed syntax must not be written where omp would fail to read it.
+    const unterminated = validateConfig('modelRoles:\n  default: "unterminated\n', 'yaml');
+    expect(unterminated.ok).toBe(false);
+    expect(unterminated.error).toBeTruthy();
+    expect(validateConfig('a: 1\n b: 2\n', 'yaml').ok).toBe(false);
+    expect(validateConfig('key: [1, 2\n', 'yaml').ok).toBe(false);
+  });
+
   it('plain json comments are rejected under strict json but ok under jsonc', () => {
     expect(validateConfig('{"a":1} // c', 'json').ok).toBe(false);
     expect(validateConfig('{"a":1} // c', 'jsonc').ok).toBe(true);

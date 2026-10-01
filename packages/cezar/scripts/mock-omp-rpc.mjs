@@ -12,9 +12,15 @@ import readline from 'node:readline';
 import { writeFileSync } from 'node:fs';
 
 // Test hook: prove the runner's SIGTERM→SIGKILL watchdog — a child that ignores
-// SIGTERM must still be hard-stopped.
-if (process.env.CEZ_MOCK_OMP_IGNORE_TERM === '1') {
+// SIGTERM AND stdin EOF (a wedged CLI) must still be hard-stopped.
+const ignoreTerm = process.env.CEZ_MOCK_OMP_IGNORE_TERM === '1';
+// Test hook: a CLI that fails at startup, before it ever reads stdin — the runner must survive
+// the EPIPE its unread prompt produces.
+if (process.env.CEZ_MOCK_OMP_EXIT_AT_ONCE === '1') process.exit(3);
+if (ignoreTerm) {
   process.on('SIGTERM', () => {});
+  // Keep the event loop alive after stdin closes, like a CLI stuck in a network call.
+  setInterval(() => {}, 1_000);
 }
 
 const sessionId = '00000000-0000-4000-8000-0000000000mp';

@@ -17,9 +17,10 @@ import { providerStatusFor } from '@/lib/provider-status'
 
 /**
  * `explainsUnknown`: for most agents `unknown` means the check itself failed, so the card offers a
- * retry. Gemini CLI has no auth-status command: its `unknown` means "no credential cezar can see",
- * and the server's hint (API key / Vertex / Workspace — Google sign-in no longer works) is the
- * actionable part (#581), so the card shows it instead.
+ * retry. Gemini CLI and omp have no auth-status command: their `unknown` means "no credential cezar
+ * can see" (omp's login lives in its own agent.db / keychain), and the server's hint — an API key /
+ * Vertex / Workspace sign-in for Gemini (#581); run `omp` once and log in, or export a provider key,
+ * for omp — is the actionable part, so the card shows it instead.
  */
 const PROVIDERS: ReadonlyArray<{ id: ProviderId; label: string; login: string; explainsUnknown?: boolean }> = [
   { id: 'claude', label: 'Claude Code', login: 'claude auth login' },

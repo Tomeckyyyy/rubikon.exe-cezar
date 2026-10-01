@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -88,6 +88,8 @@ describe('workspace provider API', () => {
   const savedDryRun = process.env.CEZ_DRY_RUN;
   const savedRemote = process.env.CEZ_REMOTE;
   const savedGeminiKey = process.env.GEMINI_API_KEY;
+  const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+  let ompAgentDir: string;
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'cez-providers-api-'));
@@ -98,6 +100,10 @@ describe('workspace provider API', () => {
     // Gemini's connected-ness is an environment read, not a probe output: give it a key so the
     // stubbed "every provider connected" host really is one.
     process.env.GEMINI_API_KEY = 'AIza-test-key';
+    // omp reads its login evidence off the host: pin an agent.db so the suite is hermetic.
+    ompAgentDir = mkdtempSync(join(tmpdir(), 'cez-omp-agent-'));
+    writeFileSync(join(ompAgentDir, 'agent.db'), '');
+    process.env.PI_CODING_AGENT_DIR = ompAgentDir;
   });
 
   afterEach(() => {
@@ -107,6 +113,9 @@ describe('workspace provider API', () => {
     else process.env.CEZ_AGENT_MODELS_LOCKED = savedModelsLocked;
     if (savedDryRun === undefined) delete process.env.CEZ_DRY_RUN;
     else process.env.CEZ_DRY_RUN = savedDryRun;
+    rmSync(ompAgentDir, { recursive: true, force: true });
+    if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
     if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
     else process.env.CEZ_REMOTE = savedRemote;
     if (savedGeminiKey === undefined) delete process.env.GEMINI_API_KEY;

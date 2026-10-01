@@ -222,6 +222,27 @@ describe('ProviderSettings', () => {
     expect(within(card('codex')).getByText(/verification failed/i)).toBeTruthy()
   })
 
+  it('shows the server hint for an omp unknown — its login is invisible from outside, not a failed check', async () => {
+    serve({
+      status: {
+        providers: [
+          { provider: 'claude', status: 'connected', enabled: true },
+          { provider: 'codex', status: 'connected', enabled: true },
+          { provider: 'opencode', status: 'connected', enabled: true },
+          { provider: 'cursor', status: 'not-installed', enabled: true },
+          { provider: 'pi', status: 'not-installed', enabled: true },
+          { provider: 'omp', status: 'unknown', enabled: true, hint: 'omp keeps its login in its own auth store — run `omp` once and log in' },
+        ],
+      },
+    })
+    renderSettings()
+
+    await within(card('omp')).findByText('Could not verify')
+    expect(within(card('omp')).getByText(/run `omp` once and log in/)).toBeTruthy()
+    expect(within(card('omp')).queryByText(/verification failed/i)).toBeNull()
+    expect(within(card('omp')).getByRole('button', { name: 'Check again' })).toBeTruthy()
+  })
+
   it('connects with only the provider id, then explains the terminal flow and refreshes status', async () => {
     serve()
     renderSettings()
