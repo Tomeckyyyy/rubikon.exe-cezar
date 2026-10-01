@@ -130,7 +130,11 @@ class OpencodeSession implements AgentSession {
    *  (the user's own message also streams as parts over the same SSE feed). */
   private readonly msgRole = new Map<string, string>();
   private tokensUsed = 0;
-  private lastCost: number | undefined;
+  /** messageID → the largest tokens/cost seen for THAT message. OpenCode reports usage per
+   *  assistant message (a turn with a tool round-trip has several), so the session figure is
+   *  the sum over messages, never the latest message's own number. */
+  private readonly usageByMessage = new Map<string, { tokens: number; cost?: number }>();
+  private lastUsageMessageId: string | undefined;
   private turnInFlight = false;
   /** Has this turn's prompt POST settled (either way)? Until it has, nothing
    *  synthesizes a turn end — only the wire does. */
@@ -609,25 +613,49 @@ class OpencodeSession implements AgentSession {
     }
   }
 
-  /** Pull cumulative tokens/cost out of an assistant message info object. */
-  private absorbUsage(info: Record<string, unknown> | undefined): void {
-    if (!info) return;
+  /**
+   * Fold one assistant message's tokens/cost into the session totals. The
+   * figures on a message are that message's own and only grow while it
+   * streams, so each message contributes its growth since it was last seen:
+   * reading them as session-cumulative dropped every message but the largest
+   * (a two-message turn of $0.0111 + $0.0170 was recorded as $0.0170).
+   * Accepts the bare info object (`message.updated`) and the prompt POST's
+   * `{ info, parts }` answer.
+   */
+  private absorbUsage(raw: Record<string, unknown> | undefined): void {
+    if (!raw) return;
+    const nested = raw.info;
+    const info = nested && typeof nested === 'object' ? (nested as Record<string, unknown>) : raw;
+    // An answer without a message id (an older server's bare POST body) is a snapshot of the
+    // message the event bus is reporting, not a further one: it shares that message's entry,
+    // whichever of the two arrives first.
+    const ownId = stringField(info, 'id');
+    if (ownId !== undefined) {
+      const anonymous = this.usageByMessage.get('');
+      if (anonymous && !this.usageByMessage.has(ownId)) {
+        this.usageByMessage.set(ownId, anonymous);
+        this.usageByMessage.delete('');
+      }
+      this.lastUsageMessageId = ownId;
+    }
+    const id = ownId ?? this.lastUsageMessageId ?? '';
+    const seen: { tokens: number; cost?: number } = this.usageByMessage.get(id) ?? { tokens: 0 };
     const tokens = info.tokens as Record<string, unknown> | undefined;
     if (tokens) {
-      const input = numField(tokens, 'input');
-      const output = numField(tokens, 'output');
-      const reasoning = numField(tokens, 'reasoning');
-      const total = input + output + reasoning;
-      if (total > this.tokensUsed) {
-        this.tokensUsed = total;
+      const total = numField(tokens, 'input') + numField(tokens, 'output') + numField(tokens, 'reasoning');
+      if (total > seen.tokens) {
+        this.tokensUsed += total - seen.tokens;
+        seen.tokens = total;
         this.emit({ type: 'token-usage', tokensUsed: this.tokensUsed });
       }
     }
     const cost = info.cost;
-    if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 && (this.lastCost === undefined || cost > this.lastCost)) {
-      this.emit({ type: 'cost', usd: cost - (this.lastCost ?? 0) });
-      this.lastCost = cost;
+    // A first report of exactly 0 is still a report (a free model), so it is emitted once.
+    if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 && (seen.cost === undefined || cost > seen.cost)) {
+      this.emit({ type: 'cost', usd: cost - (seen.cost ?? 0) });
+      seen.cost = cost;
     }
+    this.usageByMessage.set(id, seen);
   }
 
   // ---- http ---------------------------------------------------------------

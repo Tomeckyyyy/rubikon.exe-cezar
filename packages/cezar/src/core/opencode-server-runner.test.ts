@@ -267,6 +267,24 @@ describe('#897 a turn that outlives its prompt POST', () => {
     expect(result.text).toContain('Done.');
   }, 30_000);
 
+  it('sums cost and tokens across the assistant messages of a turn — each message reports its own', async () => {
+    const runner = new OpencodeServerRunner({ bin: mockBin, timeoutMs: 60_000 });
+    const { events, onEvent } = record();
+    const session = runner.startSession({ userPrompt: 'check the tree #two-messages', cwd: process.cwd() }, onEvent, {
+      autoEndAfterFirstTurn: true,
+    });
+    await session.result;
+
+    // Read as a running session total, the second message ($0.0034 after $0.0021) was recorded
+    // as a $0.0013 step and its tokens replaced the first message's instead of adding to them.
+    const cost = events
+      .filter((e): e is Extract<AgentEvent, { type: 'cost' }> => e.type === 'cost')
+      .reduce((sum, e) => sum + e.usd, 0);
+    expect(cost).toBeCloseTo(0.0055, 10);
+    const usage = events.filter((e): e is Extract<AgentEvent, { type: 'token-usage' }> => e.type === 'token-usage');
+    expect(usage.at(-1)?.tokensUsed).toBe(1500 + 2100);
+  }, 30_000);
+
   it('the prompt POST does not go through global fetch, so undici\'s 300s default cannot reach it', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const runner = new OpencodeServerRunner({ bin: mockBin, timeoutMs: 60_000 });
