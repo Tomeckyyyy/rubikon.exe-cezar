@@ -8,7 +8,7 @@
 // v2 stream must take `turn.completed` from `session.idle`, not from the
 // HTTP response.
 //
-// Four scripts, selected by a marker in the prompt text, so the #897 shapes
+// Five scripts, selected by a marker in the prompt text, so the #897 shapes
 // are reproducible without waiting five real minutes:
 //   (default)     the ordering quirk above — respond, then stream, then idle.
 //   `#drop-post`  destroy the message POST's socket mid-turn WITHOUT a
@@ -18,6 +18,8 @@
 //                 gone while the session is still working.
 //   `#no-idle`    respond and stream normally, but never send `session.idle` —
 //                 a server whose turn boundary the runner has to synthesize.
+//   `#two-messages` the default script plus a second assistant message with its own
+//                 cost and tokens, as a tool round-trip produces.
 //   `#drop-then-die` destroy the message POST's socket AND then close the event
 //                 bus: the drop was real, and the runner has to say so.
 // `MOCK_NO_EVENT_BUS=1` in the environment makes `GET /event` 404 instead, for
@@ -201,6 +203,20 @@ const server = createServer((req, res) => {
           info: info({ cost: 0.0021, tokens: { input: 1200, output: 300, reasoning: 0, cache: { read: 0, write: 0 } } }),
         },
       });
+      // A turn with a tool round-trip is TWO assistant messages on the real wire, each carrying
+      // its own cost and tokens (not a running session total).
+      if (promptText.includes('#two-messages')) {
+        send({
+          type: 'message.updated',
+          properties: {
+            info: info({
+              id: `${messageId()}_b`,
+              cost: 0.0034,
+              tokens: { input: 2000, output: 100, reasoning: 0, cache: { read: 0, write: 0 } },
+            }),
+          },
+        });
+      }
       // Respond to the prompt POST now — BEFORE the final text part and the
       // idle signal, like the real server under streaming load.
       res.writeHead(200, { 'content-type': 'application/json' });
