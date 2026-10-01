@@ -44,7 +44,9 @@ describe('backend-detect handles an absent omp CLI', () => {
     expect(omp).toBeDefined();
     expect(omp!.available).toBe(false);
     expect(omp!.hint).toContain('omp');
-  });
+    // The probe also runs `--version` on every agent CLI the host really has, which can take
+    // longer than the default timeout (the gemini and omp probes alone account for seconds).
+  }, 30_000);
 });
 
 describe('a dry-run omp session emits normalized AgentEvents', () => {
