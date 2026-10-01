@@ -96,6 +96,8 @@ const server = createServer((req, res) => {
           ? 'drop-post'
           : promptText.includes('#no-idle')
             ? 'no-idle'
+          : promptText.includes('#two-usage')
+            ? 'two-usage'
             : 'default';
 
       // The other half of the #897 shape: the POST drops AND the session is
@@ -136,6 +138,36 @@ const server = createServer((req, res) => {
           });
         }, 40);
         setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 120);
+        return;
+      }
+
+      // #cost-accounting: two assistant messages in one turn, each with its
+      // OWN cost/tokens (opencode reports per-message figures, not session
+      // totals). The v1 stream must sum them: $0.0111 + $0.0170 = $0.0281.
+      if (script === 'two-usage') {
+        send({
+          type: 'message.updated',
+          properties: {
+            info: info({
+              id: `msg_usage_1${suffix()}`,
+              cost: 0.0111,
+              tokens: { input: 8000, output: 2000, reasoning: 1000, cache: { read: 0, write: 0 } },
+            }),
+          },
+        });
+        send({
+          type: 'message.updated',
+          properties: {
+            info: info({
+              id: `msg_usage_2${suffix()}`,
+              cost: 0.017,
+              tokens: { input: 9000, output: 3000, reasoning: 2000, cache: { read: 0, write: 0 } },
+            }),
+          },
+        });
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ info: info({}), parts: [] }));
+        setTimeout(() => send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }), 60);
         return;
       }
 

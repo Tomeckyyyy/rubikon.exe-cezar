@@ -350,4 +350,30 @@ describe('#897 a turn that outlives its prompt POST', () => {
     expect(types(events).filter((t) => t === 'turn-end')).toHaveLength(1);
     expect(Date.now() - started).toBeLessThan(TURN_IDLE_GRACE_MS);
   }, 30_000);
+
+  /**
+   * #cost-accounting — opencode reports `info.cost`/`info.tokens` PER MESSAGE
+   * (each assistant message's figures start at 0 and grow as it streams), not
+   * as session totals. A single running `lastCost` diff treated a second
+   * message's cost as "cumulative so far", so a two-message turn recorded the
+   * difference instead of the sum: the r1 transcript's $0.0111 + $0.0170 came
+   * out as $0.0170 while the turn completed at $0.0281.
+   */
+  it('sums cost and tokens across every assistant message of a turn', async () => {
+    const runner = new OpencodeServerRunner({ bin: mockBin, timeoutMs: 60_000 });
+    const { events, onEvent } = record();
+    const session = runner.startSession({ userPrompt: 'two messages #two-usage', cwd: process.cwd() }, onEvent, {
+      autoEndAfterFirstTurn: true,
+    });
+    await session.result;
+
+    const costEvents = events.filter((e): e is Extract<AgentEvent, { type: 'cost' }> => e.type === 'cost');
+    const totalCost = costEvents.reduce((sum, e) => sum + e.usd, 0);
+    expect(totalCost).toBeCloseTo(0.0281, 4);
+
+    const usageEvents = events.filter((e): e is Extract<AgentEvent, { type: 'token-usage' }> => e.type === 'token-usage');
+    expect(usageEvents.length).toBeGreaterThan(0);
+    // msg1 8000+2000+1000 + msg2 9000+3000+2000 = 25000.
+    expect(usageEvents[usageEvents.length - 1].tokensUsed).toBe(25000);
+  }, 30_000);
 });

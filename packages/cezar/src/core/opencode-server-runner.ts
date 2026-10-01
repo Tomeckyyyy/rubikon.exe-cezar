@@ -129,8 +129,19 @@ class OpencodeSession implements AgentSession {
   /** messageID → role. Parts carry no role; only assistant parts are surfaced
    *  (the user's own message also streams as parts over the same SSE feed). */
   private readonly msgRole = new Map<string, string>();
+  /** messageID → last cost/token-total seen for THAT message. opencode's
+   *  `info.cost` / `info.tokens` are per-message figures: they start at 0 and
+   *  grow as the message streams, and each assistant message carries its own.
+   *  Something that sums across sessions under-counts any turn with more than
+   *  one assistant message — the old `lastCost` diff treated them as one
+   *  running total, so a two-message turn (r1: msg $0.0111 + msg $0.0170)
+   *  recorded $0.0170 while the wire said $0.0281. */
+  private readonly msgCost = new Map<string, number>();
+  private readonly msgTokens = new Map<string, number>();
+  /** Fallback cost tracker for info objects with no message id — the old
+   *  single-running-total behaviour, reached only on a malformed payload. */
+  private selfCost: number | undefined;
   private tokensUsed = 0;
-  private lastCost: number | undefined;
   private turnInFlight = false;
   /** Has this turn's prompt POST settled (either way)? Until it has, nothing
    *  synthesizes a turn end — only the wire does. */
@@ -609,24 +620,48 @@ class OpencodeSession implements AgentSession {
     }
   }
 
-  /** Pull cumulative tokens/cost out of an assistant message info object. */
+  /** Pull per-message tokens/cost out of an assistant message info object and
+   *  fold them into the session totals. opencode reports `info.cost` /
+   *  `info.tokens` PER MESSAGE: each assistant message's figures start at 0
+   *  and grow as it streams, and a later message's figures are not cumulative
+   *  of the earlier ones. A single running `lastCost`/`maxTotal` therefore
+   *  under-counts every turn with more than one assistant message — the #897
+   *  r1 transcript: msg $0.0111 + msg $0.0170 recorded $0.0170 while the turn
+   *  completed at $0.0281. Account per message id instead: each message's own
+   *  delta is emitted once, and `tokensUsed` becomes the true sum. */
   private absorbUsage(info: Record<string, unknown> | undefined): void {
     if (!info) return;
+    const id = stringField(info, 'id');
     const tokens = info.tokens as Record<string, unknown> | undefined;
     if (tokens) {
       const input = numField(tokens, 'input');
       const output = numField(tokens, 'output');
       const reasoning = numField(tokens, 'reasoning');
       const total = input + output + reasoning;
-      if (total > this.tokensUsed) {
+      if (id !== undefined) {
+        const seen = this.msgTokens.get(id) ?? 0;
+        if (total > seen) {
+          this.msgTokens.set(id, total);
+          this.tokensUsed += total - seen;
+          this.emit({ type: 'token-usage', tokensUsed: this.tokensUsed });
+        }
+      } else if (total > this.tokensUsed) {
         this.tokensUsed = total;
         this.emit({ type: 'token-usage', tokensUsed: this.tokensUsed });
       }
     }
     const cost = info.cost;
-    if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 && (this.lastCost === undefined || cost > this.lastCost)) {
-      this.emit({ type: 'cost', usd: cost - (this.lastCost ?? 0) });
-      this.lastCost = cost;
+    if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0) {
+      if (id !== undefined) {
+        const seen = this.msgCost.get(id) ?? 0;
+        if (cost > seen) {
+          this.msgCost.set(id, cost);
+          this.emit({ type: 'cost', usd: cost - seen });
+        }
+      } else if (this.selfCost === undefined || cost > this.selfCost) {
+        this.emit({ type: 'cost', usd: cost - (this.selfCost ?? 0) });
+        this.selfCost = cost;
+      }
     }
   }
 
