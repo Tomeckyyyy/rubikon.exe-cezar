@@ -1431,6 +1431,80 @@ describe('gemini provider status (#581): an environment read, never a login prob
     expect(rows.gemini).toEqual({ status: 'unknown', hint: GEMINI_AUTH_HINT });
   });
 
+  describe('Google sign-in on an organization license (Workspace / Code Assist)', () => {
+    const GOOGLE_NAMES = [
+      'GOOGLE_GENAI_USE_GCA',
+      'GOOGLE_CLOUD_PROJECT',
+      'GOOGLE_CLOUD_PROJECT_ID',
+      'GOOGLE_CLOUD_ACCESS_TOKEN',
+      'GEMINI_FORCE_ENCRYPTED_FILE_STORAGE',
+    ] as const;
+    const clearGoogleEnv = () => {
+      for (const name of GOOGLE_NAMES) delete process.env[name];
+    };
+    beforeEach(() => {
+      clearGoogleEnv();
+      mkdirSync(join(geminiHome, '.gemini'));
+    });
+    afterEach(clearGoogleEnv);
+
+    const chooseGoogleLogin = () =>
+      writeFileSync(join(geminiHome, '.gemini', 'settings.json'), '{"security":{"auth":{"selectedType":"oauth-personal"}}}');
+    const completeSignIn = () =>
+      writeFileSync(join(geminiHome, '.gemini', 'oauth_creds.json'), '{"refresh_token":"1//test"}');
+    const geminiStatus = async () =>
+      (await statuses(new ProviderAuthService({ runCommand: runner(), platform: 'linux' }))).gemini!.status;
+
+    it('is connected when sign-in is chosen, completed, and a project is in the environment', async () => {
+      chooseGoogleLogin();
+      completeSignIn();
+      process.env.GOOGLE_CLOUD_PROJECT = 'team-project';
+      expect(await geminiStatus()).toBe('connected');
+    });
+
+    it('reads the project from the .env Gemini CLI loads itself, under either name', async () => {
+      chooseGoogleLogin();
+      completeSignIn();
+      writeFileSync(join(geminiHome, '.gemini', '.env'), 'export GOOGLE_CLOUD_PROJECT_ID=team-project\n');
+      expect(await geminiStatus()).toBe('connected');
+    });
+
+    it('takes GOOGLE_GENAI_USE_GCA=true as the choice when settings.json names no method', async () => {
+      completeSignIn();
+      process.env.GOOGLE_GENAI_USE_GCA = 'true';
+      process.env.GOOGLE_CLOUD_PROJECT = 'team-project';
+      expect(await geminiStatus()).toBe('connected');
+    });
+
+    it('stays unknown without a project — the retired individual sign-in never had one', async () => {
+      chooseGoogleLogin();
+      completeSignIn();
+      expect(await geminiStatus()).toBe('unknown');
+    });
+
+    it('stays unknown when the sign-in was never completed', async () => {
+      chooseGoogleLogin();
+      process.env.GOOGLE_CLOUD_PROJECT = 'team-project';
+      expect(await geminiStatus()).toBe('unknown');
+    });
+
+    it('a project alone is not a credential', async () => {
+      completeSignIn();
+      process.env.GOOGLE_CLOUD_PROJECT = 'team-project';
+      expect(await geminiStatus()).toBe('unknown');
+    });
+
+    it('accepts a keychain-held or caller-supplied token in place of oauth_creds.json', async () => {
+      chooseGoogleLogin();
+      process.env.GOOGLE_CLOUD_PROJECT = 'team-project';
+      process.env.GEMINI_FORCE_ENCRYPTED_FILE_STORAGE = 'true';
+      expect(await geminiStatus()).toBe('connected');
+      delete process.env.GEMINI_FORCE_ENCRYPTED_FILE_STORAGE;
+      process.env.GOOGLE_CLOUD_ACCESS_TOKEN = 'ya29.test';
+      expect(await geminiStatus()).toBe('connected');
+    });
+  });
+
   it('is not-installed with an install hint when the CLI is absent, and honours CEZ_GEMINI_BIN', async () => {
     process.env.CEZ_GEMINI_BIN = '/tools/gemini custom';
     const runCommand = runner((executable) =>
