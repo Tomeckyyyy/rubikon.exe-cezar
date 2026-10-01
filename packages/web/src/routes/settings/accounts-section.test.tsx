@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { queryKeys, workspaceQueryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
+import { RUNNER_IDS } from '@open-mercato/cezar-api-client'
 import type { AgentProfile, AgentProfilesResponse } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { AppRoutes } from '@/routes'
@@ -755,7 +756,7 @@ describe('the agent accounts section', () => {
       [...document.querySelectorAll('[data-slot="accounts-tabs"] [data-provider]')].map((el) =>
         el.getAttribute('data-provider'),
       ),
-    ).toEqual(['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp', 'gemini'])
+    ).toEqual([...RUNNER_IDS])
   })
 
   it('offers no Add on an agent that cannot carry a second account, and says why', async () => {
