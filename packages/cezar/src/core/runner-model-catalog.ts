@@ -96,14 +96,17 @@ export class RunnerModelCatalog {
   }
 }
 
+/** One label per runner — a runner without a host catalog still names itself, never "OpenCode". */
+const RUNNER_LABEL: Record<RunnerId, string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  cursor: 'Cursor',
+  pi: 'pi',
+  omp: 'OMP',
+  gemini: 'Gemini CLI',
+};
+
 function unavailableReason(runner: RunnerId): string {
-  const name =
-    runner === 'codex'
-      ? 'Codex'
-      : runner === 'claude'
-        ? 'Claude'
-        : runner === 'cursor'
-          ? 'Cursor'
-          : 'OpenCode';
-  return `${name} model discovery is temporarily unavailable`;
+  return `${RUNNER_LABEL[runner]} model discovery is temporarily unavailable`;
 }

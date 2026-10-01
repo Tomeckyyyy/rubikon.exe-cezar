@@ -30,7 +30,9 @@ function assertType<_T extends true>(): void {}
 describe('UiEvent vocabulary (compile-time contract)', () => {
   it('UiBackend stays in lockstep with RunnerId (no drift with agent-runner.ts)', () => {
     assertType<Equal<UiBackend, RunnerId>>();
-    expect<UiBackend[]>(['claude', 'codex', 'opencode', 'cursor', 'pi', 'gemini', 'omp']).toBeDefined();
+    // …and both to the contract's own union, the single source every enumeration derives from.
+    assertType<Equal<UiBackend, Runner>>();
+    expect<UiBackend[]>(['claude', 'codex', 'opencode', 'cursor', 'pi', 'omp', 'gemini']).toBeDefined();
   });
 
   it('enums match the research §7 vocabulary exactly', () => {

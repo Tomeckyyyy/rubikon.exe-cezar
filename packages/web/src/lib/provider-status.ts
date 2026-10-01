@@ -1,8 +1,8 @@
 import { RUNNER_IDS } from '@open-mercato/cezar-api-client'
 import type { ProviderStatus, ProviderStatusResponse, Runner } from '@open-mercato/cezar-api-client'
 
-// Contract-derived, never hand-listed: a runner missing here makes every real status response
-// fail to parse (the server always sends a row per runner), so no provider can be verified.
+// Contract-derived, never hand-listed: the server answers one row per runner, and a runner
+// missing here makes every real status response fail to parse — no provider can be verified.
 const RUNNER_ORDER: readonly Runner[] = RUNNER_IDS
 const PROVIDER_STATES = new Set(['connected', 'disconnected', 'not-installed', 'unknown'])
 

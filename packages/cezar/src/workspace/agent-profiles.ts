@@ -43,13 +43,19 @@ export function defaultAgentProfile(
   env: NodeJS.ProcessEnv = process.env,
 ): ResolvedAgentProfile {
   const home = agentHomePaths(env);
-  const path =
-    provider === 'codex' ? home.codex
-    : provider === 'opencode' ? home.opencodeConfig
-    : provider === 'cursor' ? home.cursor
-    : provider === 'omp' ? home.omp
-    : provider === 'gemini' ? home.gemini
-    : home.claude;
+  // One slot per runner, so adding a runner without a home slot is a type error here.
+  const homeByProvider: Record<ProviderId, string> = {
+    claude: home.claude,
+    codex: home.codex,
+    opencode: home.opencodeConfig,
+    cursor: home.cursor,
+    // pi has no home slot in `AgentHomePaths` (no config dir of its own to relocate); the
+    // fallback the ternary this replaces always answered is kept as-is.
+    pi: home.claude,
+    omp: home.omp,
+    gemini: home.gemini,
+  };
+  const path = homeByProvider[provider];
   return {
     id: DEFAULT_AGENT_ACCOUNT_ID,
     provider,

@@ -439,7 +439,7 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     docsUrl: OMP_MCP_DOCS,
   },
 
-// ---- Gemini CLI ----
+  // ---- Gemini CLI ----
   {
     id: 'gemini.user.settings',
     runners: ['gemini'],

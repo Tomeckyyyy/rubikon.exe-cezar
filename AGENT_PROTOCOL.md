@@ -468,8 +468,8 @@ To be first-class:
    reason (§6) — never silently skipped. (If the backend has no wire parent
    attribution, document the nesting cell's substitute the way codex's
    review-mode items are handled.)
-8. **Plumbing** — the run-store `runner` enum, workflow step schema, the
    Gemini's fixtures are real `gemini --acp` transcripts (`__fixtures__/gemini/`); its plan row is the `WIRE_GAPS` entry (§6), not an `except`-list exclusion.
+8. **Plumbing** — the run-store `runner` enum, workflow step schema, the
    `POST /api/runs` / `PUT /api/config` bodies, `resumeCommand()`, the web
    `Runner` type, composer pills/presets, and Settings → Agents. Keep additive
    so old `runs.json` records still parse (the `runner` enum keeps `claude-cli`

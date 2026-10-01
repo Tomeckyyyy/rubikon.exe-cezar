@@ -385,7 +385,8 @@ export function buildChildEnv(opts: BuildChildEnvOptions): NodeJS.ProcessEnv {
     cloudPrefixes.push(...VERTEX_ALLOW_PREFIXES);
     for (const n of VERTEX_ALLOW_NAMES) cloudNames.add(n);
   }
-  if (opts.backend === 'gemini' && isTruthy(readVar(source, GEMINI_VERTEX_TOGGLE))) {
+  // Exactly `'true'`, as Gemini CLI itself (and `gemini-credentials.ts`) reads the selector.
+  if (opts.backend === 'gemini' && readVar(source, GEMINI_VERTEX_TOGGLE) === 'true') {
     for (const n of GEMINI_VERTEX_ALLOW_NAMES) cloudNames.add(n);
   }
   const backendNames = BACKEND_ALLOW_NAMES[opts.backend] ?? new Set<string>();

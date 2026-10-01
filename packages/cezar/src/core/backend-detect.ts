@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolveCursorAgentBin } from './cursor-agent-runner.ts';
+import type { RunnerId } from './agent-runner.ts';
 import { resolveClaudeBin } from './claude-bin.ts';
 import { geminiHasCredentials } from './gemini-credentials.ts';
 import { GEMINI_AUTH_HINT } from './gemini-ui-mapper.ts';
@@ -8,7 +9,7 @@ import { GEMINI_AUTH_HINT } from './gemini-ui-mapper.ts';
 const exec = promisify(execFile);
 
 export interface BackendCheck {
-  name: 'claude' | 'codex' | 'opencode' | 'cursor' | 'pi' | 'gemini' | 'omp' | 'gh' | 'git';
+  name: RunnerId | 'gh' | 'git';
   available: boolean;
   version?: string;
   hint?: string;

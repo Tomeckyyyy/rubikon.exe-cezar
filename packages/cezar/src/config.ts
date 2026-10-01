@@ -91,16 +91,7 @@ const configSchema = z.object({
    * `.catch(undefined)` keeps the key additive-safe like `systemPrompt`: a
    * bad value degrades to unset without discarding the rest of the config.
    */
-  defaultModels: z
-    .object({
-      claude: z.string().trim().min(1).max(200).optional(),
-      codex: z.string().trim().min(1).max(200).optional(),
-      opencode: z.string().trim().min(1).max(200).optional(),
-      cursor: z.string().trim().min(1).max(200).optional(),
-      pi: z.string().trim().min(1).max(200).optional(),
-      omp: z.string().trim().min(1).max(200).optional(),
-      gemini: z.string().trim().min(1).max(200).optional(),
-    })
+  defaultModels: perRunner(z.string().trim().min(1).max(200).optional())
     .optional()
     .catch(undefined),
   /**
