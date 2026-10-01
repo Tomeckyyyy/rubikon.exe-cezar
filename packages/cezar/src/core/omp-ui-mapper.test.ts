@@ -142,5 +142,26 @@ describe('omp RPC → v2 golden fixtures', () => {
     expect(settled.events).toEqual([
       { type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn', usage: { input: 13, output: 12, total: 125, cacheRead: 100, cacheWrite: 0 }, costUsd: 0.003 },
     ]);
+
+    // A second turn: the session total keeps growing, the turn total starts from zero.
+    let next = ompTurnStarted(settled.state).state;
+    const third = mapOmpRpcMessage(
+      {
+        type: 'message_end',
+        message: { role: 'assistant', usage: { input: 20, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 21, cost: { total: 0.004 } } },
+      },
+      next,
+    );
+    expect(third.events).toEqual([
+      { type: 'usage.updated', usage: { input: 33, output: 13, total: 146, cacheRead: 100, cacheWrite: 0 }, costUsd: 0.007 },
+    ]);
+    next = third.state;
+    const settledAgain = mapOmpRpcMessage({ type: 'prompt_result', status: 'completed', sessionSettled: true }, next);
+    expect(settledAgain.events).toEqual([
+      { type: 'turn.completed', turnId: 'turn_2', stopReason: 'end_turn', usage: { input: 20, output: 1, total: 21, cacheRead: 0, cacheWrite: 0 }, costUsd: 0.004 },
+    ]);
+    // A turn omp ends without any usage reports none — it does not inherit the previous turn's.
+    const quiet = mapOmpRpcMessage({ type: 'prompt_result', status: 'completed', sessionSettled: true }, ompTurnStarted(settledAgain.state).state);
+    expect(quiet.events).toEqual([{ type: 'turn.completed', turnId: 'turn_3', stopReason: 'end_turn' }]);
   });
 });

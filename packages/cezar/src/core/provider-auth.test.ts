@@ -22,6 +22,7 @@ vi.mock('./claude-bin.ts', async (importOriginal) => ({
 import { GEMINI_AUTH_FAILURE_MESSAGE, GEMINI_AUTH_HINT } from './gemini-ui-mapper.ts';
 import {
   ProviderAuthService,
+  isOmpCredentialVariable,
   isRuntimeProviderAuthFailure,
   providerAuthChecksDisabled,
   type ProviderCommandResult,
@@ -1520,5 +1521,87 @@ describe('gemini provider status (#581): an environment read, never a login prob
 
   it('a runtime Gemini auth failure is recognized by the server-side latch', () => {
     expect(isRuntimeProviderAuthFailure(GEMINI_AUTH_FAILURE_MESSAGE)).toBe(true);
+  });
+});
+
+describe('omp credential discovery', () => {
+  let ompAgentDir: string;
+  let strippedKeys: Record<string, string | undefined>;
+  const TOUCHED = ['OPENROUTER_API_KEY', 'OPENAI_BASE_URL', 'ANTHROPIC_MODEL'];
+
+  beforeEach(() => {
+    // Point omp's connectedness probe at a fresh temp agent dir and keep the host's own keys out.
+    ompAgentDir = mkdtempSync(join(tmpdir(), 'cez-omp-agent-'));
+    process.env.PI_CODING_AGENT_DIR = ompAgentDir;
+    strippedKeys = {};
+    for (const name of Object.keys(process.env)) {
+      if (isOmpCredentialVariable(name) || TOUCHED.includes(name)) {
+        strippedKeys[name] = process.env[name];
+        delete process.env[name];
+      }
+    }
+  });
+  afterEach(() => {
+    for (const name of TOUCHED) delete process.env[name];
+    for (const [name, value] of Object.entries(strippedKeys)) {
+      if (value !== undefined) process.env[name] = value;
+    }
+    rmSync(ompAgentDir, { recursive: true, force: true });
+  });
+
+  it('is unknown — never disconnected — with the login hint when no credential is visible', async () => {
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner() }));
+    expect(rows.omp!.status).toBe('unknown');
+    expect(rows.omp!.hint).toMatch(/run `omp` once and log in/);
+  });
+
+  it('is connected on the agent.db a native login leaves in the active agent dir', async () => {
+    writeFileSync(join(ompAgentDir, 'agent.db'), '');
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner() }));
+    expect(rows.omp).toEqual({ status: 'connected', hint: undefined });
+  });
+
+  it('is connected on a NON-EMPTY provider key, and a key that is set but empty is no credential', async () => {
+    process.env.OPENROUTER_API_KEY = '';
+    expect((await statuses(new ProviderAuthService({ runCommand: runner() }))).omp!.status).toBe('unknown');
+    process.env.OPENROUTER_API_KEY = 'sk-or-test';
+    expect((await statuses(new ProviderAuthService({ runCommand: runner() }))).omp!.status).toBe('connected');
+  });
+
+  it('a provider variable that is not a key (OPENAI_BASE_URL, ANTHROPIC_MODEL) is no credential', async () => {
+    process.env.OPENAI_BASE_URL = 'http://localhost:1234/v1';
+    process.env.ANTHROPIC_MODEL = 'claude-sonnet-5';
+    expect((await statuses(new ProviderAuthService({ runCommand: runner() }))).omp!.status).toBe('unknown');
+    expect(isOmpCredentialVariable('OPENAI_BASE_URL')).toBe(false);
+    expect(isOmpCredentialVariable('OPENAI_API_KEY')).toBe(true);
+    expect(isOmpCredentialVariable('openrouter_api_key')).toBe(true);
+    expect(isOmpCredentialVariable('GITHUB_TOKEN')).toBe(false);
+  });
+
+  it('reads a second account\'s own agent dir, not the default account\'s store', async () => {
+    const second = mkdtempSync(join(tmpdir(), 'cez-omp-second-'));
+    try {
+      const service = new ProviderAuthService({ runCommand: runner() });
+      // Default account logged in, second one not: the second must not borrow the default's evidence.
+      writeFileSync(join(ompAgentDir, 'agent.db'), '');
+      expect((await service.profileStatus('omp', { id: 'work', configDir: second })).status).toBe('unknown');
+      // And the other way round.
+      rmSync(join(ompAgentDir, 'agent.db'), { force: true });
+      writeFileSync(join(second, 'agent.db'), '');
+      expect((await statuses(new ProviderAuthService({ runCommand: runner() }))).omp!.status).toBe('unknown');
+      expect((await new ProviderAuthService({ runCommand: runner() }).profileStatus('omp', { id: 'work', configDir: second })).status).toBe('connected');
+    } finally {
+      rmSync(second, { recursive: true, force: true });
+    }
+  });
+
+  it('is not-installed with the install hint when the CLI is absent', async () => {
+    const rows = await statuses(new ProviderAuthService({
+      runCommand: runner((executable) => executable === 'omp'
+        ? { stdout: '', stderr: '', exitCode: null, errorCode: 'ENOENT' }
+        : resultFor(executable)),
+    }));
+    expect(rows.omp!.status).toBe('not-installed');
+    expect(rows.omp!.hint).toMatch(/Install OMP/);
   });
 });
