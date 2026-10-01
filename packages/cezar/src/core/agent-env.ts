@@ -259,11 +259,14 @@ const BACKEND_ALLOW_NAMES: Partial<Record<AgentBackend, ReadonlySet<string>>> = 
   gemini: upperSet([
     'GOOGLE_API_KEY',
     'GOOGLE_CLOUD_PROJECT',
+    'GOOGLE_CLOUD_PROJECT_ID',
     'GOOGLE_CLOUD_LOCATION',
     // Gemini's own auth selectors (`getAuthTypeFromEnv` in the 0.60 bundle): Vertex AI, Google
-    // login for Workspace/Code Assist licenses, and a custom API gateway.
+    // login for Workspace/Code Assist licenses (optionally with a caller-supplied token), and a
+    // custom API gateway.
     'GOOGLE_GENAI_USE_VERTEXAI',
     'GOOGLE_GENAI_USE_GCA',
+    'GOOGLE_CLOUD_ACCESS_TOKEN',
     'GOOGLE_GEMINI_BASE_URL',
   ]),
 };
