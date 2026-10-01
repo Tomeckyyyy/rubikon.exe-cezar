@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -119,6 +119,35 @@ describe('GeminiAcpRunner — session lifecycle', () => {
     expect(JSON.stringify(c.events)).not.toContain('an earlier answer');
     expect(JSON.stringify(c.ui)).not.toContain('an earlier answer');
     expect(c.events).toContainEqual({ type: 'session', sessionId });
+  });
+
+  it('Continue removes the shell recording an earlier resume left, so Gemini CLI keeps the history', async () => {
+    // Gemini CLI 0.60 deletes history and shell together at its next startup (gemini-sessions.ts).
+    const sessionId = '11111111-2222-4333-8444-555555555555';
+    const home = mkdtempSync(join(tmpdir(), 'cez-gemini-home-'));
+    try {
+      const chats = join(home, '.gemini', 'tmp', 'repo', 'chats');
+      mkdirSync(chats, { recursive: true });
+      const header = JSON.stringify({ sessionId, projectHash: 'd4e7', startTime: '2026-10-01T20:05:00.000Z', kind: 'main' });
+      const context = JSON.stringify({ $set: { messages: [{ type: 'user', content: [{ text: '<session_context>' }] }] } });
+      const history = join(chats, 'session-2026-10-01T20-05-11111111.jsonl');
+      const shell = join(chats, 'session-2026-10-01T20-06-11111111.jsonl');
+      writeFileSync(history, [header, context, JSON.stringify({ id: 'm1', type: 'user', content: [{ text: 'first' }] }), ''].join('\n'));
+      writeFileSync(shell, [header, context, ''].join('\n'));
+
+      const c = collect();
+      const result = await new GeminiAcpRunner({ bin: MOCK })
+        .startSession({ userPrompt: 'carry on', cwd, sessionId, resume: true, env: { GEMINI_CLI_HOME: home } }, c.onEvent, {
+          autoEndAfterFirstTurn: true,
+          onUiEvent: c.onUiEvent,
+        })
+        .result;
+      expect(result.sessionId).toBe(sessionId);
+      expect(existsSync(shell)).toBe(false);
+      expect(existsSync(history)).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it('starts a fresh session with a note when the agent does not advertise session/load', async () => {
