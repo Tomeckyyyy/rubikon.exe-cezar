@@ -138,9 +138,18 @@ class OpencodeSession implements AgentSession {
    *  recorded $0.0170 while the wire said $0.0281. */
   private readonly msgCost = new Map<string, number>();
   private readonly msgTokens = new Map<string, number>();
-  /** Fallback cost tracker for info objects with no message id — the old
-   *  single-running-total behaviour, reached only on a malformed payload. */
-  private selfCost: number | undefined;
+  /** Cost already reported through the v1 stream — the id-less POST echo is
+   *  only additive over this (it describes the same message the id'd SSE
+   *  replay just reported). */
+  private costCounted = 0;
+  /** An id-less echo (the POST's copy of a message's figures) that arrived
+   *  before that message's id'd SSE replay; the replay absorbs it instead of
+   *  reporting the same money twice. Cleared once absorbed. */
+  private pendingEcho: number | undefined;
+  /** Whether ANY cost report has been emitted — a known zero is itself a
+   *  report (the consumer learns the cost is 0, not unknown), so the FIRST
+   *  sight of a cost always emits, even when the delta is 0. */
+  private anyCostEmitted = false;
   private tokensUsed = 0;
   private turnInFlight = false;
   /** Has this turn's prompt POST settled (either way)? Until it has, nothing
@@ -628,7 +637,13 @@ class OpencodeSession implements AgentSession {
    *  under-counts every turn with more than one assistant message — the #897
    *  r1 transcript: msg $0.0111 + msg $0.0170 recorded $0.0170 while the turn
    *  completed at $0.0281. Account per message id instead: each message's own
-   *  delta is emitted once, and `tokensUsed` becomes the true sum. */
+   *  delta contributes once, and `tokensUsed` becomes the true sum.
+   *
+   * The prompt POST's response carries the JUST-FINISHED message's figures
+   * WITHOUT an id (opencode answers `{info, parts}`). That echo must not
+   * double-count against the id'd SSE replay of the same message, so an
+   * id-less cost is held in `pendingEcho` until the next id'd message either
+   * absorbs it (same figures) or is outgrown by it. */
   private absorbUsage(info: Record<string, unknown> | undefined): void {
     if (!info) return;
     const id = stringField(info, 'id');
@@ -652,16 +667,33 @@ class OpencodeSession implements AgentSession {
     }
     const cost = info.cost;
     if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0) {
-      if (id !== undefined) {
-        const seen = this.msgCost.get(id) ?? 0;
-        if (cost > seen) {
-          this.msgCost.set(id, cost);
-          this.emit({ type: 'cost', usd: cost - seen });
+      if (id === undefined) {
+        // The POST echo of the just-finished message (opencode answers
+        // `{info, parts}`) carries the same figures the id'd SSE replay
+        // carries. Count only what the id'd stream has NOT already reported;
+        // a delta of 0 means the echo is stale (its message was already
+        // counted id'd) and it must not linger as a later message's baseline.
+        const delta = Math.max(0, cost - this.costCounted);
+        if (delta > 0 || !this.anyCostEmitted) {
+          this.emit({ type: 'cost', usd: delta });
+          this.anyCostEmitted = true;
+          this.costCounted += delta;
+          this.pendingEcho = Math.max(this.pendingEcho ?? 0, cost);
         }
-      } else if (this.selfCost === undefined || cost > this.selfCost) {
-        this.emit({ type: 'cost', usd: cost - (this.selfCost ?? 0) });
-        this.selfCost = cost;
+        return;
       }
+      // This id'd message absorbs any unclaimed id-less echo (the POST's copy
+      // of the same figures), then reports only its own growth.
+      const seen = this.msgCost.get(id);
+      const baseline = Math.max(seen ?? 0, this.pendingEcho ?? 0);
+      const delta = cost - baseline;
+      if (delta > 0 || !this.anyCostEmitted) {
+        this.emit({ type: 'cost', usd: delta });
+        this.anyCostEmitted = true;
+        this.costCounted += delta;
+      }
+      this.msgCost.set(id, cost);
+      if (this.pendingEcho !== undefined && cost >= this.pendingEcho) this.pendingEcho = undefined;
     }
   }
 
