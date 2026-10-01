@@ -1392,6 +1392,11 @@ describe('gemini provider status (#581): an environment read, never a login prob
     geminiHome = mkdtempSync(join(tmpdir(), 'cez-gemini-home-'));
     process.env.GEMINI_CLI_HOME = geminiHome;
     delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_CLOUD_PROJECT;
+    delete process.env.GOOGLE_CLOUD_PROJECT_ID;
+    delete process.env.GOOGLE_CLOUD_ACCESS_TOKEN;
+    delete process.env.GOOGLE_GENAI_USE_GCA;
+    delete process.env.GEMINI_FORCE_ENCRYPTED_FILE_STORAGE;
   });
   afterEach(() => {
     rmSync(geminiHome, { recursive: true, force: true });
@@ -1424,6 +1429,52 @@ describe('gemini provider status (#581): an environment read, never a login prob
     writeFileSync(join(geminiHome, '.gemini', 'settings.json'), '{"security":{"auth":{"selectedType":"oauth-personal"}}}');
     const rows = await statuses(new ProviderAuthService({ runCommand: runner(), platform: 'linux' }));
     expect(rows.gemini).toEqual({ status: 'unknown', hint: GEMINI_AUTH_HINT });
+  });
+
+  it('a Google sign-in is connected when it has the shape of a licensed (Workspace/Code Assist) account', async () => {
+    // `/auth` → "Login with Google", a project named, oauth_creds.json on disk — the three
+    // conditions `hasLicensedGoogleLogin` requires. An unlicensed account still fails at run time.
+    mkdirSync(join(geminiHome, '.gemini'));
+    writeFileSync(join(geminiHome, '.gemini', 'settings.json'), '{"security":{"auth":{"selectedType":"oauth-personal"}}}');
+    writeFileSync(join(geminiHome, '.gemini', 'oauth_creds.json'), '{"access_token":"ya29.…","refresh_token":"1//…"}');
+    process.env.GOOGLE_CLOUD_PROJECT = 'company-project';
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner(), platform: 'linux' }));
+    expect(rows.gemini!.status).toBe('connected');
+  });
+
+  it('a sign-in with a project but no completed login is still unknown', async () => {
+    mkdirSync(join(geminiHome, '.gemini'));
+    writeFileSync(join(geminiHome, '.gemini', 'settings.json'), '{"security":{"auth":{"selectedType":"oauth-personal"}}}');
+    process.env.GOOGLE_CLOUD_PROJECT = 'company-project';
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner(), platform: 'linux' }));
+    expect(rows.gemini).toEqual({ status: 'unknown', hint: GEMINI_AUTH_HINT });
+  });
+
+  it('a sign-in with a completed login but no project is still unknown', async () => {
+    mkdirSync(join(geminiHome, '.gemini'));
+    writeFileSync(join(geminiHome, '.gemini', 'settings.json'), '{"security":{"auth":{"selectedType":"oauth-personal"}}}');
+    writeFileSync(join(geminiHome, '.gemini', 'oauth_creds.json'), '{"access_token":"ya29.…"}');
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner(), platform: 'linux' }));
+    expect(rows.gemini).toEqual({ status: 'unknown', hint: GEMINI_AUTH_HINT });
+  });
+
+  it('a code-assist sign-in named by GOOGLE_GENAI_USE_GCA with a token env var is connected', async () => {
+    process.env.GOOGLE_GENAI_USE_GCA = 'true';
+    process.env.GOOGLE_CLOUD_PROJECT_ID = 'company-project';
+    process.env.GOOGLE_CLOUD_ACCESS_TOKEN = 'ya29.…';
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner(), platform: 'linux' }));
+    expect(rows.gemini!.status).toBe('connected');
+  });
+
+  it('a licensed sign-in whose token lives in the OS keychain still counts (encrypted storage)', async () => {
+    // GEMINI_FORCE_ENCRYPTED_FILE_STORAGE=true keeps oauth_creds.json out of the gemini dir, so
+    // the first two conditions stand alone — cezar cannot read the OS keychain.
+    mkdirSync(join(geminiHome, '.gemini'));
+    writeFileSync(join(geminiHome, '.gemini', 'settings.json'), '{"security":{"auth":{"selectedType":"oauth-personal"}}}');
+    process.env.GOOGLE_CLOUD_PROJECT = 'company-project';
+    process.env.GEMINI_FORCE_ENCRYPTED_FILE_STORAGE = 'true';
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner(), platform: 'linux' }));
+    expect(rows.gemini!.status).toBe('connected');
   });
 
   it('is unknown — never disconnected — with the API-key hint when no credential is visible', async () => {

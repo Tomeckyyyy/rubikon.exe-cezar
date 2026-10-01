@@ -3,10 +3,11 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 /**
- * The auth methods a user can have configured that still work for Gemini CLI. Google sign-in
- * (`oauth-personal`) is deliberately absent: for individuals it now fails every session with
- * `UNSUPPORTED_CLIENT` (`__fixtures__/gemini/unsupported-client.ndjson`), so a host configured only
- * for it is not evidence of working credentials. Ids from `AuthType` in the 0.60.0 bundle.
+ * The auth methods a user can have configured that work for Gemini CLI without a Google sign-in.
+ * Google sign-in (`oauth-personal`) is deliberately absent here: for individuals it now fails every
+ * session with `UNSUPPORTED_CLIENT` (`__fixtures__/gemini/unsupported-client.ndjson`), so a host
+ * configured only for it is not evidence of working credentials — `hasLicensedGoogleLogin` below
+ * decides when a sign-in DOES count. Ids from `AuthType` in the 0.60.0 bundle.
  */
 const WORKING_AUTH_TYPES: ReadonlySet<string> = new Set([
   'gemini-api-key',
@@ -15,6 +16,12 @@ const WORKING_AUTH_TYPES: ReadonlySet<string> = new Set([
   'compute-default-credentials',
   'cloud-shell',
 ]);
+
+/** Google sign-in, as `AuthType.LOGIN_WITH_GOOGLE` spells it in settings.json. */
+const GOOGLE_LOGIN_AUTH_TYPE = 'oauth-personal';
+
+/** The names Gemini CLI reads the Code Assist project from (`setupUser` in the 0.60.0 bundle). */
+const PROJECT_NAMES = ['GOOGLE_CLOUD_PROJECT', 'GOOGLE_CLOUD_PROJECT_ID'] as const;
 
 /**
  * Does this host visibly hold credentials Gemini CLI can use? Gemini CLI has no `auth status`
@@ -39,14 +46,53 @@ export function geminiHasCredentials(env: NodeJS.ProcessEnv = process.env): bool
   if (present(env.GEMINI_API_KEY) || present(env.GOOGLE_API_KEY) || present(env.GOOGLE_GEMINI_BASE_URL)) return true;
   if (env.GOOGLE_GENAI_USE_VERTEXAI === 'true' && present(env.GOOGLE_CLOUD_PROJECT)) return true;
   const home = present(env.GEMINI_CLI_HOME) ? env.GEMINI_CLI_HOME! : homedir();
-  if ([join(home, '.gemini', '.env'), join(home, '.env')].some(definesKey)) return true;
+  const envFiles = [join(home, '.gemini', '.env'), join(home, '.env')];
+  if (envFiles.some((path) => definesAny(path, ['GEMINI_API_KEY', 'GOOGLE_API_KEY']))) return true;
   const selected = selectedAuthType(join(home, '.gemini', 'settings.json'));
-  return selected !== undefined && WORKING_AUTH_TYPES.has(selected);
+  if (selected !== undefined && WORKING_AUTH_TYPES.has(selected)) return true;
+  return hasLicensedGoogleLogin(env, home, envFiles, selected);
 }
 
-function definesKey(path: string): boolean {
+/**
+ * Google sign-in still works for an account whose organization holds a license (Workspace / Gemini
+ * Code Assist Standard or Enterprise) — only the individual tier was retired (gemini-cli#28229).
+ * cezar cannot ask Google which tier an account is on, so a sign-in counts only when all three of
+ * these hold, which is the shape of a licensed setup and not an individual's leftover login:
+ *
+ * - Google sign-in is the chosen method (`oauth-personal` in settings.json, or the env selector
+ *   `GOOGLE_GENAI_USE_GCA=true`);
+ * - a Google Cloud project is named (`GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_PROJECT_ID`, in the
+ *   environment or the `.env` files the CLI loads) — a licensed account needs one; the retired
+ *   individual tier never did;
+ * - a completed sign-in token is on disk (`<gemini home>/.gemini/oauth_creds.json`), or the caller
+ *   supplies one itself (`GOOGLE_CLOUD_ACCESS_TOKEN`). Under
+ *   `GEMINI_FORCE_ENCRYPTED_FILE_STORAGE=true` the CLI stores the token in the OS keychain, which
+ *   cezar cannot read — there the first two conditions stand alone.
+ *
+ * An account that turns out to be unlicensed still fails at run time as `provider-auth-required`,
+ * so a false positive never runs — it surfaces the same way a wrong API key does.
+ */
+function hasLicensedGoogleLogin(
+  env: NodeJS.ProcessEnv,
+  home: string,
+  envFiles: readonly string[],
+  selected: string | undefined,
+): boolean {
+  const googleLoginChosen = env.GOOGLE_GENAI_USE_GCA === 'true' || selected === GOOGLE_LOGIN_AUTH_TYPE;
+  if (!googleLoginChosen) return false;
+  const projectNamed =
+    PROJECT_NAMES.some((name) => present(env[name])) || envFiles.some((path) => definesAny(path, PROJECT_NAMES));
+  if (!projectNamed) return false;
+  return (
+    present(env.GOOGLE_CLOUD_ACCESS_TOKEN) ||
+    env.GEMINI_FORCE_ENCRYPTED_FILE_STORAGE === 'true' ||
+    readText(join(home, '.gemini', 'oauth_creds.json')) !== undefined
+  );
+}
+
+function definesAny(path: string, names: readonly string[]): boolean {
   const text = readText(path);
-  return text !== undefined && /^\s*(?:export\s+)?(?:GEMINI_API_KEY|GOOGLE_API_KEY)\s*=\s*\S/m.test(text);
+  return text !== undefined && new RegExp(`^\\s*(?:export\\s+)?(?:${names.join('|')})\\s*=\\s*\\S`, 'm').test(text);
 }
 
 function selectedAuthType(path: string): string | undefined {

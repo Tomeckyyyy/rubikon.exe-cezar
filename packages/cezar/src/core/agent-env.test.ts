@@ -376,6 +376,21 @@ describe('buildChildEnv — gemini (#581)', () => {
     expect(env.OPENAI_API_KEY).toBeUndefined();
   });
 
+  it('forwards the licensed Code Assist sign-in names to Gemini', () => {
+    const env = buildChildEnv({
+      backend: 'gemini',
+      source: {
+        ...HOST,
+        GOOGLE_CLOUD_PROJECT_ID: 'proj-id',
+        GOOGLE_CLOUD_ACCESS_TOKEN: 'ya29.token',
+        GOOGLE_GENAI_USE_GCA: 'true',
+      },
+    });
+    expect(env.GOOGLE_CLOUD_PROJECT_ID).toBe('proj-id');
+    expect(env.GOOGLE_CLOUD_ACCESS_TOKEN).toBe('ya29.token');
+    expect(env.GOOGLE_GENAI_USE_GCA).toBe('true');
+  });
+
   it('forwards the service-account file only while Gemini’s own Vertex selector is on', () => {
     expect(buildChildEnv({ backend: 'gemini', source: HOST }).GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
     const vertex = buildChildEnv({ backend: 'gemini', source: { ...HOST, GOOGLE_GENAI_USE_VERTEXAI: 'true' } });
