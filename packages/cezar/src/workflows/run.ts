@@ -22,6 +22,7 @@ import {
   ModelIdentityError,
   formatModelIdentity,
   normalizeModelForBackend,
+  resolveModelIdentity,
 } from '../core/model-identity.ts';
 import {
   HANDOFF_ONLY_INSTRUCTIONS,
@@ -4863,6 +4864,30 @@ export class RunManager {
     if (state.cancelled || (this.active.has(runId) && this.active.get(runId) !== state)) return;
     this.recordUsageUiEvent(runId, state, event);
     sink.handle(event);
+    // An AUTO run (no `model` on the request and no `modelIdentity` persisted
+    // yet — the backend picked its default) learns the resolved model from the
+    // backend's own session start and persists it, so the record stops saying
+    // `model: null` while the run really ran on e.g. `claude-fable-5-1`
+    // (T5: "record resolved model on auto runs"). Only fills when the record is
+    // missing the identity — an explicit user model always wins.
+    if (event.type === 'session.started' && event.model !== undefined) {
+      const current = this.store.getRun(runId);
+      if (current && current.modelIdentity === undefined) {
+        try {
+          const normalized = resolveModelIdentity(event.backend, event.model);
+          if (normalized) {
+            const identity = formatModelIdentity(normalized);
+            this.store.updateRun(runId, {
+              model: event.model,
+              modelIdentity: identity,
+            });
+          }
+        } catch {
+          // An unresolvable model name is not a run failure: the UI event has
+          // already been persisted, and the record keeps `model: null`.
+        }
+      }
+    }
     if (event.type !== 'ask.requested' || state.cancelled) return;
     this.clearIdleTimer(state);
     this.leaveMonitoring(runId);

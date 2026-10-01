@@ -225,6 +225,86 @@ describe('RunManager directional usage accounting', () => {
   });
 });
 
+describe('RunManager persists an AUTO run’s resolved model from session.started', () => {
+  let repoRoot: string;
+  let store: RunStore;
+  let manager: RunManager;
+  let internal: UsageAccountingHarness;
+
+  beforeEach(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'cez-resolved-model-'));
+    store = RunStore.open(join(repoRoot, '.ai/cezar'));
+    manager = new RunManager(store, repoRoot, {
+      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }),
+    });
+    internal = manager as unknown as UsageAccountingHarness;
+  });
+
+  afterEach(() => {
+    manager.dispose();
+    store.flush();
+    rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  function autoRun() {
+    // `createRun` with no `model` — the user picked `auto`, so the backend
+    // resolves the default and the record has nothing to echo at spawn.
+    const run = store.createRun({
+      title: 'auto model',
+      workflow: 'quick-task',
+      task: 'auto model',
+      steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
+    });
+    store.updateStep(run.id, 'work', { iterations: 1, status: 'running' });
+    const state: Record<string, unknown> = { cancelled: false, interrupt: () => undefined, cwd: repoRoot };
+    const sink = { handle: (_event: UiEvent) => undefined };
+    return { run, state, sink };
+  }
+
+  it('fills model/modelIdentity when session.started names the backend-chosen model', () => {
+    const { run, state, sink } = autoRun();
+    internal.handleRunnerUiEvent(run.id, state, sink, {
+      type: 'session.started',
+      sessionId: 'ses_1',
+      backend: 'claude',
+      model: 'claude-fable-5-1',
+    });
+    expect(store.getRun(run.id)).toMatchObject({
+      model: 'claude-fable-5-1',
+      modelIdentity: 'anthropic/claude-fable-5-1',
+    });
+  });
+
+  it('keeps an explicit user-chosen model: it never overwrites an existing modelIdentity', () => {
+    const { run, state, sink } = autoRun();
+    store.updateRun(run.id, { model: 'claude-sonnet-4-6', modelIdentity: 'anthropic/claude-sonnet-4-6' });
+    internal.handleRunnerUiEvent(run.id, state, sink, {
+      type: 'session.started',
+      sessionId: 'ses_1',
+      backend: 'claude',
+      model: 'claude-fable-5-1',
+    });
+    expect(store.getRun(run.id)).toMatchObject({
+      model: 'claude-sonnet-4-6',
+      modelIdentity: 'anthropic/claude-sonnet-4-6',
+    });
+  });
+
+  it('ignores an unresolvable model name without failing the run', () => {
+    const { run, state, sink } = autoRun();
+    // omp selects across providers: a bare model (no `provider/`) is rejected
+    // loudly by `resolveModelIdentity`. The session event has already been
+    // persisted; the record stays without an identity — no throw, no corruption.
+    internal.handleRunnerUiEvent(run.id, state, sink, {
+      type: 'session.started',
+      sessionId: 'ses_1',
+      backend: 'omp',
+      model: 'just-a-bare-model',
+    });
+    expect(store.getRun(run.id)?.modelIdentity).toBeUndefined();
+  });
+});
+
 it('parallel variants ignore a worktree opt-out and retain isolated mode', () => {
   const repoRoot = mkdtempSync(join(tmpdir(), 'cez-variant-isolation-'));
   const store = RunStore.open(join(repoRoot, '.ai/cezar'));

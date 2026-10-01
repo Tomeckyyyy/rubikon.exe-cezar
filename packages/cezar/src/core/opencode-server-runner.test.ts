@@ -373,7 +373,8 @@ describe('#897 a turn that outlives its prompt POST', () => {
 
     const usageEvents = events.filter((e): e is Extract<AgentEvent, { type: 'token-usage' }> => e.type === 'token-usage');
     expect(usageEvents.length).toBeGreaterThan(0);
+    const last = usageEvents[usageEvents.length - 1];
     // msg1 8000+2000+1000 + msg2 9000+3000+2000 = 25000.
-    expect(usageEvents[usageEvents.length - 1].tokensUsed).toBe(25000);
+    expect(last!.tokensUsed).toBe(25000);
   }, 30_000);
 });
