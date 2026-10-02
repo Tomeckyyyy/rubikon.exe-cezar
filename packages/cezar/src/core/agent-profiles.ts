@@ -39,6 +39,16 @@ import type { ProviderId } from './provider-auth.ts';
  * - **pi** → nothing documented. pi ships no per-user home variable of its own, so — exactly like
  *   OpenCode — a second account cannot be carried without silently billing the wrong one. `null`
  *   until pi documents a single home variable that moves credentials as well as config.
+ * - **junie** → nothing documented. Its shim's `JUNIE_DATA` relocates only the installed BINARY
+ *   versions directory (`~/.local/share/junie`); the actual per-user state — `secure_credentials.json`,
+ *   `config.json`, `sessions/` — lives under `~/.junie` with no override var in `junie --help`
+ *   (`--config-location`/`--cache-dir` add or redirect narrower pieces, not the whole home). `null`
+ *   until junie documents one, same rule as OpenCode/pi.
+ * - **copilot** → `COPILOT_HOME` moves config and state, but whether it also moves the stored
+ *   login has not been tested, and Copilot reads `COPILOT_GITHUB_TOKEN` / `GH_TOKEN` /
+ *   `GITHUB_TOKEN` ahead of any stored credential regardless. `null` until a test proves one
+ *   variable moves both (spec 2026-09-19-runner-seam-native-backends Q14) — being wrong here
+ *   bills the wrong account.
  * - **gemini** → `null` for now (spec 2026-09-19 Q14). `GEMINI_CLI_HOME` relocates `.gemini`, but
  *   on 2026-09-19 a fresh `GEMINI_CLI_HOME` (and even a fresh `HOME`) still authenticated with the
  *   stored API key (`__fixtures__/gemini/README.md`), so it does not provably move credentials.
@@ -49,6 +59,8 @@ export const PROFILE_ENV_VAR: Record<ProviderId, string | null> = {
   opencode: null,
   cursor: null,
   pi: null,
+  junie: null,
+  copilot: null,
   gemini: null,
 };
 
@@ -104,6 +116,10 @@ const PROFILE_DIR_MARKERS: Record<ProviderId, readonly string[]> = {
   // pi cannot carry profiles (`PROFILE_ENV_VAR.pi === null`), so nothing ever probes a pi
   // profile dir; the entry exists to keep this table exhaustive over `ProviderId`.
   pi: [],
+  // junie cannot carry profiles either (`PROFILE_ENV_VAR.junie === null`) — same reason.
+  junie: [],
+  // Same for copilot (`PROFILE_ENV_VAR.copilot === null`).
+  copilot: [],
   // Same as pi: `PROFILE_ENV_VAR.gemini === null`, kept only for exhaustiveness.
   gemini: [],
 };

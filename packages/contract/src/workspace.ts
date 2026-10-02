@@ -43,6 +43,7 @@ export const workspaceConfigResponseSchema = z.object({
   resources: z.object({
     maxParallel: z.number(),
     maxMonitoringSessions: z.number(),
+    idleTimeoutMinutes: z.number().nullable(),
     monitoringWakeIntervalMinutes: z.number().nullable(),
     /** Resume a run a provider usage limit stopped, once the limit resets. Default `true`. */
     autoResumeOnUsageLimit: z.boolean(),
@@ -59,12 +60,14 @@ export const workspaceConfigResponseSchema = z.object({
    */
   agentDefaults: z.object({
     runner: runnerSchema.optional(),
-models: z.object({
+    models: z.object({
       claude: z.string().optional(),
       codex: z.string().optional(),
       opencode: z.string().optional(),
       cursor: z.string().optional(),
       pi: z.string().optional(),
+      junie: z.string().optional(),
+      copilot: z.string().optional(),
       gemini: z.string().optional(),
     }).optional(),
   }),
@@ -93,13 +96,15 @@ export const setWorkspaceConfigInputSchema = z.object({
   agentDefaults: z
     .object({
       runner: runnerSchema.nullable().optional(),
-models: z
+      models: z
         .object({
           claude: z.string().trim().min(1).max(200).nullable().optional(),
           codex: z.string().trim().min(1).max(200).nullable().optional(),
           opencode: z.string().trim().min(1).max(200).nullable().optional(),
+          junie: z.string().trim().min(1).max(200).nullable().optional(),
           cursor: z.string().trim().min(1).max(200).nullable().optional(),
           pi: z.string().trim().min(1).max(200).nullable().optional(),
+          copilot: z.string().trim().min(1).max(200).nullable().optional(),
           gemini: z.string().trim().min(1).max(200).nullable().optional(),
         })
         .optional(),
@@ -109,6 +114,7 @@ models: z
     .object({
       maxParallel: z.number().int().min(1).max(16).optional(),
       maxMonitoringSessions: z.number().int().min(0).max(16).optional(),
+      idleTimeoutMinutes: z.number().int().min(0).max(1440).nullable().optional(),
       monitoringWakeIntervalMinutes: z.number().int().min(1).max(60).nullable().optional(),
       autoResumeOnUsageLimit: z.boolean().optional(),
       memoryLimitMb: z.number().int().min(0).max(1_048_576).nullable().optional(),
@@ -171,6 +177,8 @@ export const uiStateSchema = z.looseObject({
   runsView: z.enum(['list', 'table']).optional(),
   /** The GitHub tab's last-selected sub-tab (#417). Absent → issues. */
   githubView: z.enum(['issues', 'prs']).optional(),
+  /** The GitHub tab's list order. Absent → newest first, which is what `gh` already returns. */
+  githubSort: z.enum(['newest', 'oldest']).optional(),
   /** Settings → Appearance. The theme itself stays in localStorage (`cez-theme`) — it must
    *  pre-paint, and it is per-browser by design. */
   appearance: appearanceSchema.optional(),
@@ -257,13 +265,15 @@ export const workspaceUiStateSchema = z.looseObject({
   /** Dismissed runtime-auth incident IDs, keyed by provider. An ID is only dismissed until the
    *  provider reports a different incident, so this stays workspace-global with the browser
    *  rather than one project checkout. */
-dismissedProviderAuthFailures: z
+  dismissedProviderAuthFailures: z
     .object({
       claude: z.string().optional(),
       codex: z.string().optional(),
       opencode: z.string().optional(),
       cursor: z.string().optional(),
       pi: z.string().optional(),
+      junie: z.string().optional(),
+      copilot: z.string().optional(),
       gemini: z.string().optional(),
     })
     .optional(),
@@ -354,9 +364,11 @@ export type SetWorkspaceUiStateInput = z.infer<typeof setWorkspaceUiStateInputSc
 export const runnerModelsSchema = z.object({
   claude: z.string().optional(),
   codex: z.string().optional(),
+  junie: z.string().optional(),
   opencode: z.string().optional(),
   cursor: z.string().optional(),
   pi: z.string().optional(),
+  copilot: z.string().optional(),
   gemini: z.string().optional(),
 });
 export type RunnerModels = z.infer<typeof runnerModelsSchema>;
@@ -399,13 +411,14 @@ export const setConfigInputSchema = z.object({
   baseBranch: z.string().trim().min(1).max(200).nullable().optional(),
   defaultRunner: runnerSchema.optional(),
   systemPrompt: z.string().trim().max(20_000).nullable().optional(),
-defaultModels: z
+  defaultModels: z
     .object({
       claude: z.string().trim().max(200).nullable().optional(),
       codex: z.string().trim().max(200).nullable().optional(),
       opencode: z.string().trim().max(200).nullable().optional(),
       cursor: z.string().trim().max(200).nullable().optional(),
       pi: z.string().trim().max(200).nullable().optional(),
+      copilot: z.string().trim().max(200).nullable().optional(),
       gemini: z.string().trim().max(200).nullable().optional(),
     })
     .optional(),
@@ -517,11 +530,11 @@ export type ProviderConnectResponse = z.infer<typeof providerConnectResponseSche
 /**
  * The runners whose model list is discovered from the host rather than hard-coded: Codex through
  * its app-server protocol, OpenCode through its own `models` listing (#794), Claude through the
- * CLI's `list_models` control request (#784), and Cursor through its CLI model listing. A runner absent here has no discovery path and
+ * CLI's `list_models` control request (#784), Cursor through its CLI model listing, and Junie through ACP session config options. A runner absent here has no discovery path and
  * 400s, so the client compiles against exactly what the route accepts. One definition, used by
  * the route's query validator and by the cockpit's picker.
  */
-export const modelDiscoveryRunnerSchema = z.enum(['claude', 'codex', 'opencode', 'cursor']);
+export const modelDiscoveryRunnerSchema = z.enum(['claude', 'codex', 'opencode', 'cursor', 'junie']);
 export type ModelDiscoveryRunner = z.infer<typeof modelDiscoveryRunnerSchema>;
 export const MODEL_DISCOVERY_RUNNERS: readonly ModelDiscoveryRunner[] =
   modelDiscoveryRunnerSchema.options;
@@ -538,7 +551,7 @@ export const runnerModelOptionSchema = z.object({
 });
 export type RunnerModelOption = z.infer<typeof runnerModelOptionSchema>;
 
-/** `GET /api/v1/models?runner=claude|codex|opencode|cursor` — the models discovered from that runner's
+/** `GET /api/v1/models?runner=claude|codex|opencode|cursor|junie` — the models discovered from that runner's
  *  own host installation, plus how fresh the answer is. Never an error: an unavailable CLI
  *  degrades to `source: 'unavailable'` with a `reason`. */
 export const runnerModelCatalogResponseSchema = z.object({

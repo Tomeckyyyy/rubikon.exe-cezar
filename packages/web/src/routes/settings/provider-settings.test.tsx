@@ -8,7 +8,7 @@ import type { ProviderStatusResponse } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { applyProviderStatusRow } from '@/lib/provider-status'
 import { workspaceQueryKeys } from '@/api/queries'
-import { ProviderSettings } from './provider-settings'
+import { PROVIDERS, ProviderSettings } from './provider-settings'
 
 const ALL_STATUSES: ProviderStatusResponse = {
   providers: [
@@ -115,8 +115,11 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
+/** One card per provider — derived so a new runner does not mean editing literal counts. */
+const PROVIDER_CARDS = PROVIDERS.length
+
 describe('ProviderSettings', () => {
-  it('always renders Claude Code, Codex, OpenCode, Cursor, pi and Gemini CLI cards in that order', async () => {
+  it('always renders every provider card in descriptor order', async () => {
     serve()
     renderSettings()
 
@@ -125,7 +128,7 @@ describe('ProviderSettings', () => {
       [...document.querySelectorAll('[data-slot="provider-card"]')].map((item) =>
         item.querySelector('h3')?.textContent,
       ),
-    ).toEqual(['Claude Code', 'Codex', 'OpenCode', 'Cursor', 'pi', 'Gemini CLI'])
+    ).toEqual(['Claude Code', 'Codex', 'Junie', 'OpenCode', 'Cursor', 'pi', 'GitHub Copilot CLI', 'Gemini CLI'])
   })
 
   it('presents discovery truth, enablement, and runtime recovery without hiding diagnostics', async () => {
@@ -186,6 +189,7 @@ describe('ProviderSettings', () => {
         providers: [
           { provider: 'claude', status: 'connected', enabled: true },
           { provider: 'codex', status: 'unknown', enabled: true },
+          { provider: 'junie', status: 'unknown', enabled: true, hint: 'Junie authentication check failed: invalid credentials.' },
           { provider: 'opencode', status: 'connected', enabled: true },
           { provider: 'cursor', status: 'not-installed', enabled: true },
         ],
@@ -198,16 +202,17 @@ describe('ProviderSettings', () => {
     expect(within(card('codex')).getByRole('button', { name: 'Check again' })).toBeTruthy()
     expect(within(card('codex')).queryByText('Not connected')).toBeNull()
     expect(within(card('codex')).queryByRole('button', { name: 'Connect' })).toBeNull()
+    expect(within(card('junie')).getByText('Junie authentication check failed: invalid credentials.')).toBeTruthy()
   })
 
-  it('shows Gemini CLI’s own API-key hint for its unknown state, where the others say verification failed (#581)', async () => {
+  it('shows Gemini CLI’s own API-key hint for its unknown state instead of the generic verification failure (#581)', async () => {
     const hint =
       'Gemini CLI needs an API key (aistudio.google.com), Vertex AI, or a Workspace/Code Assist license — personal Google sign-in no longer works for Gemini CLI.'
     serve({
       status: {
         providers: [
           { provider: 'claude', status: 'connected', enabled: true },
-          { provider: 'codex', status: 'unknown', enabled: true, hint: 'Authentication could not be verified. Try again.' },
+          { provider: 'codex', status: 'unknown', enabled: true },
           { provider: 'gemini', status: 'unknown', enabled: true, hint },
         ],
       },
@@ -218,7 +223,8 @@ describe('ProviderSettings', () => {
     expect(within(card('gemini')).getByText(hint)).toBeTruthy()
     expect(within(card('gemini')).queryByText(/verification failed/i)).toBeNull()
     expect(within(card('gemini')).getByRole('button', { name: 'Check again' })).toBeTruthy()
-    // Every other agent keeps the verification-failure line for `unknown`.
+    // Gemini CLI has no auth-status command, so its `unknown` means "no credential cezar can see"
+    // and the server's hint is the actionable part. An `unknown` WITHOUT a hint keeps the generic line.
     expect(within(card('codex')).getByText(/verification failed/i)).toBeTruthy()
   })
 
@@ -293,7 +299,7 @@ describe('ProviderSettings', () => {
 
     expect(await screen.findByText('Provider status could not be loaded')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
-    expect(document.querySelectorAll('[data-slot="provider-card"]')).toHaveLength(6)
+    expect(document.querySelectorAll('[data-slot="provider-card"]')).toHaveLength(PROVIDER_CARDS)
   })
 
   it('treats a malformed successful response as a safe verification error', async () => {
@@ -303,7 +309,7 @@ describe('ProviderSettings', () => {
 
     expect(await screen.findByText('Provider status could not be loaded')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy()
-    expect(document.querySelectorAll('[data-slot="provider-card"]')).toHaveLength(6)
+    expect(document.querySelectorAll('[data-slot="provider-card"]')).toHaveLength(PROVIDER_CARDS)
     expect(screen.queryByText(secret)).toBeNull()
   })
 

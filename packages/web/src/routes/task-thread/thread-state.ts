@@ -1,7 +1,6 @@
 import type { RunEvent, RunStatus } from '@open-mercato/cezar-api-client'
 import { runItemKey } from '@/api/run-events'
 import {
-  runnerSchema,
   toolDisplay,
   type PlanEntry,
   type PlanStatus,
@@ -71,7 +70,7 @@ export interface ThreadAsk {
 export interface ThreadProviderAuthRequired {
   kind: 'provider-auth-required'
   id: string
-  provider: 'claude' | 'codex' | 'opencode' | 'cursor' | 'pi' | 'gemini'
+  provider: 'claude' | 'codex' | 'junie' | 'opencode' | 'cursor' | 'pi' | 'copilot' | 'gemini'
   authFailureId: string
 }
 
@@ -218,7 +217,16 @@ function stamp(value: unknown): string | undefined {
 }
 
 function providerId(value: unknown): ThreadProviderAuthRequired['provider'] | undefined {
-  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'cursor' || value === 'pi' || value === 'gemini'
+  return (
+    value === 'claude' ||
+    value === 'codex' ||
+    value === 'junie' ||
+    value === 'opencode' ||
+    value === 'cursor' ||
+    value === 'pi' ||
+    value === 'copilot' ||
+    value === 'gemini'
+  )
     ? value
     : undefined
 }

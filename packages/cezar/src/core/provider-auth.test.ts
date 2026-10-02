@@ -18,7 +18,11 @@ vi.mock('./claude-bin.ts', async (importOriginal) => ({
   ...await importOriginal<typeof import('./claude-bin.ts')>(),
   resolveClaudeBin: (env: NodeJS.ProcessEnv = process.env) => env.CEZ_CLAUDE_BIN || 'claude',
 }));
+vi.mock('./junie-auth-probe.ts', () => ({
+  probeJunieAuthentication: vi.fn(async () => ({ connected: true })),
+}));
 
+import { PROVIDER_IDS } from './provider-auth.ts';
 import { GEMINI_AUTH_FAILURE_MESSAGE, GEMINI_AUTH_HINT } from './gemini-ui-mapper.ts';
 import {
   ProviderAuthService,
@@ -27,6 +31,7 @@ import {
   type ProviderCommandResult,
   type RunProviderCommand,
 } from './provider-auth.ts';
+import { probeJunieAuthentication } from './junie-auth-probe.ts';
 
 const connectedResults: Record<string, ProviderCommandResult> = {
   claude: { stdout: '{"loggedIn":true}', stderr: '', exitCode: 0 },
@@ -56,6 +61,13 @@ const connectedResults: Record<string, ProviderCommandResult> = {
     stderr: '',
     exitCode: 0,
   },
+  // Copilot's probe drives its ACP server; a `sessionId` back means the credential is entitled
+  // (`.ai/runs/2026-09-27-copilot-cli-runner/copilot-acp-notes.md`).
+  copilot: {
+    stdout: '{"jsonrpc":"2.0","id":1,"result":{"sessionId":"3f1b6f2e-0000-4000-8000-1f2e3d4c5b6a"}}',
+    stderr: '',
+    exitCode: 0,
+  },
   // `gemini --version`: Gemini CLI has no auth-status command, so this only proves the install; the
   // credentials come from the environment (`gemini-credentials.ts`).
   gemini: { stdout: '0.60.0\n', stderr: '', exitCode: 0 },
@@ -68,8 +80,9 @@ const originalEnv = {
   CEZ_CODEX_BIN: process.env.CEZ_CODEX_BIN,
   CEZ_OPENCODE_BIN: process.env.CEZ_OPENCODE_BIN,
   CEZ_PI_BIN: process.env.CEZ_PI_BIN,
-CURSOR_API_KEY: process.env.CURSOR_API_KEY,
-CEZ_GEMINI_BIN: process.env.CEZ_GEMINI_BIN,
+  CURSOR_API_KEY: process.env.CURSOR_API_KEY,
+  CEZ_COPILOT_BIN: process.env.CEZ_COPILOT_BIN,
+  CEZ_GEMINI_BIN: process.env.CEZ_GEMINI_BIN,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   GEMINI_CLI_HOME: process.env.GEMINI_CLI_HOME,
 };
@@ -82,9 +95,10 @@ beforeEach(() => {
   delete process.env.CEZ_OPENCODE_BIN;
   delete process.env.CEZ_PI_BIN;
   delete process.env.CURSOR_API_KEY;
+  delete process.env.CEZ_COPILOT_BIN;
   delete process.env.CEZ_GEMINI_BIN;
   // Gemini's connected-ness is an environment read (the setup file strips the host's): give every
-  // case a key so "all connected" still means all five. The gemini block below removes it.
+  // case a key so "all connected" still means every provider. The gemini block below removes it.
   process.env.GEMINI_API_KEY = 'AIza-test-key';
 });
 
@@ -95,11 +109,18 @@ afterEach(() => {
   }
 });
 
+/** One status command per provider — the size of a full probe round. Derived rather than
+ *  written out so adding runner #6 does not mean editing a dozen literal counts in this file.
+ *  Junie is the exception: `probe()` routes it through `probeJunieAuthentication`, never
+ *  `runCommand`, so it is a status row but not a status command. */
+const PROBE_ROUND = PROVIDER_IDS.filter((provider) => provider !== 'junie').length;
+
 function resultFor(executable: string): ProviderCommandResult {
   if (executable === 'claude') return connectedResults.claude!;
   if (executable.includes('codex')) return connectedResults.codex!;
   if (executable === 'agent' || executable.includes('cursor')) return connectedResults.cursor!;
   if (executable.includes('opencode')) return connectedResults.opencode!;
+  if (executable.includes('copilot')) return connectedResults.copilot!;
   if (executable.includes('gemini')) return connectedResults.gemini!;
   return connectedResults.pi!;
 }
@@ -607,7 +628,7 @@ describe('provider auth parsers', () => {
 });
 
 describe('ProviderAuthService', () => {
-it('always returns claude, codex, opencode, cursor, pi, gemini in descriptor order', async () => {
+  it('always returns every provider in descriptor order', async () => {
     const service = new ProviderAuthService({ runCommand: runner() });
 
     await expect(service.status()).resolves.toMatchObject({
@@ -617,12 +638,14 @@ it('always returns claude, codex, opencode, cursor, pi, gemini in descriptor ord
         { provider: 'opencode' },
         { provider: 'cursor' },
         { provider: 'pi' },
+        { provider: 'junie', status: 'connected' },
+        { provider: 'copilot' },
         { provider: 'gemini' },
       ],
     });
   });
 
-it('runs the six status commands concurrently with a 10 second timeout', async () => {
+  it('runs every status command concurrently with a 10 second timeout', async () => {
     const calls: Array<{ executable: string; args: readonly string[]; timeoutMs: number }> = [];
     let release!: () => void;
     const waiting = new Promise<void>((resolve) => { release = resolve; });
@@ -634,13 +657,14 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
     const service = new ProviderAuthService({ runCommand });
     const pending = service.status();
 
-    await vi.waitFor(() => expect(calls).toHaveLength(6));
+    await vi.waitFor(() => expect(calls).toHaveLength(PROBE_ROUND));
     expect(calls).toEqual([
       { executable: 'claude', args: ['auth', 'status', '--json'], timeoutMs: 10_000 },
       { executable: 'codex', args: ['login', 'status'], timeoutMs: 10_000 },
       { executable: 'opencode', args: ['auth', 'list'], timeoutMs: 10_000 },
       { executable: 'agent', args: ['status', '--format', 'json'], timeoutMs: 10_000 },
       { executable: 'pi', args: ['--list-models'], timeoutMs: 10_000 },
+      { executable: 'copilot', args: ['--acp'], timeoutMs: 10_000 },
       { executable: 'gemini', args: ['--version'], timeoutMs: 10_000 },
     ]);
     release();
@@ -687,8 +711,8 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
       await service.status();
       now += 9 * 60_000;
       await service.status();
-      // Still five: one probe per provider, from the first call only.
-      expect(runCommand).toHaveBeenCalledTimes(6);
+      // Still four: one probe per provider, from the first call only.
+      expect(runCommand).toHaveBeenCalledTimes(PROBE_ROUND);
     });
 
     it('re-probes an all-connected answer once the long window passes', async () => {
@@ -699,7 +723,7 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
       await service.status();
       now += 10 * 60_000 + 1;
       await service.status();
-      expect(runCommand).toHaveBeenCalledTimes(12);
+      expect(runCommand).toHaveBeenCalledTimes(PROBE_ROUND * 2);
     });
 
     it('re-checks a NOT-connected answer sooner, so a terminal login is noticed on its own', async () => {
@@ -717,10 +741,10 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
       await service.status();
       now += 59_999;
       await service.status();
-      expect(runCommand).toHaveBeenCalledTimes(6); // still inside the short window
+      expect(runCommand).toHaveBeenCalledTimes(PROBE_ROUND); // still inside the short window
       now += 2;
       await service.status();
-      expect(runCommand).toHaveBeenCalledTimes(12); // past it → re-probed
+      expect(runCommand).toHaveBeenCalledTimes(PROBE_ROUND * 2); // past it → re-probed
     });
 
     it('serves the stale answer immediately and refreshes BEHIND it, never in front', async () => {
@@ -735,7 +759,7 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
         now: () => now,
         runCommand: async (executable) => {
           probes += 1;
-          if (probes > 6) await gate; // only the SECOND round of probes hangs
+          if (probes > PROBE_ROUND) await gate; // only the SECOND round of probes hangs
           return resultFor(executable);
         },
       });
@@ -749,11 +773,11 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
           expect.objectContaining({ provider: 'claude', status: 'connected' }),
         ]),
       });
-      expect(probes).toBe(12); // …and it did kick the refresh off
+      expect(probes).toBe(PROBE_ROUND * 2); // …and it did kick the refresh off
 
       // A reader arriving mid-revalidation is served from cache too, not attached to the probe.
       await expect(service.status()).resolves.toBeDefined();
-      expect(probes).toBe(12); // no second refresh piled on top
+      expect(probes).toBe(PROBE_ROUND * 2); // no second refresh piled on top
       release();
     });
 
@@ -765,7 +789,7 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
           expect.objectContaining({ provider: 'claude', status: 'connected' }),
         ]),
       });
-      expect(runCommand).toHaveBeenCalledTimes(6);
+      expect(runCommand).toHaveBeenCalledTimes(PROBE_ROUND);
     });
 
     it('applies the same asymmetry per account', async () => {
@@ -786,7 +810,7 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
 
     await service.status();
     await service.status({ refresh: true });
-    expect(runCommand).toHaveBeenCalledTimes(12);
+    expect(runCommand).toHaveBeenCalledTimes(PROBE_ROUND * 2);
   });
 
   it('keeps one incident id until an explicit matching clear and creates a new id afterward', async () => {
@@ -1036,7 +1060,7 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
     const service = new ProviderAuthService({ runCommand });
 
     const pending = service.status();
-    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6));
+    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(PROBE_ROUND));
     service.reportRuntimeAuthFailure('claude');
     release();
 
@@ -1096,6 +1120,8 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
         { provider: 'opencode', status: 'connected' },
         { provider: 'cursor', status: 'connected' },
         { provider: 'pi', status: 'connected' },
+        { provider: 'junie', status: 'connected' },
+        { provider: 'copilot', status: 'connected' },
         { provider: 'gemini', status: 'connected' },
       ],
     });
@@ -1123,10 +1149,10 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
     const ordinary = service.status();
     const refresh = service.status({ refresh: true });
     expect(refresh).toBe(ordinary);
-    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6));
+    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(PROBE_ROUND));
     release();
     await expect(Promise.all([ordinary, refresh])).resolves.toHaveLength(2);
-    expect(runCommand).toHaveBeenCalledTimes(6);
+    expect(runCommand).toHaveBeenCalledTimes(PROBE_ROUND);
   });
 
   it('gives ordinary callers one shared visible promise for a fresh probe after a latch', async () => {
@@ -1143,7 +1169,7 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
     const ordinary = service.status();
 
     expect(refresh).toBe(ordinary);
-    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6));
+    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(PROBE_ROUND));
     release();
     await expect(ordinary.then(({ providers }) => providers[0])).resolves.toMatchObject({
       provider: 'claude',
@@ -1196,7 +1222,7 @@ it('runs the six status commands concurrently with a 10 second timeout', async (
       .toBe('"C:\\Program Files\\op^%en^&co^!de^".exe" auth login');
   });
 
-it('reports every provider connected in CEZ_DRY_RUN without executing a command', async () => {
+  it('reports every provider connected in CEZ_DRY_RUN without executing a command', async () => {
     process.env.CEZ_DRY_RUN = '1';
     const runCommand = runner();
     const service = new ProviderAuthService({ runCommand });
@@ -1208,6 +1234,8 @@ it('reports every provider connected in CEZ_DRY_RUN without executing a command'
         { provider: 'opencode', status: 'connected' },
         { provider: 'cursor', status: 'connected' },
         { provider: 'pi', status: 'connected' },
+        { provider: 'junie', status: 'connected' },
+        { provider: 'copilot', status: 'connected' },
         { provider: 'gemini', status: 'connected' },
       ],
     });
@@ -1263,7 +1291,7 @@ it('reports every provider connected in CEZ_DRY_RUN without executing a command'
       const before = spawns;
       now += 60 * 60_000; // an hour later
 
-      expect(service.peekStatus()?.providers).toHaveLength(6);
+      expect(service.peekStatus()?.providers).toHaveLength(PROVIDER_IDS.length);
       expect(service.peekProfileStatus('claude', 'work')).toBeDefined();
       expect(spawns).toBe(before); // …and still nothing spawned
     });
@@ -1286,7 +1314,7 @@ it('reports every provider connected in CEZ_DRY_RUN without executing a command'
       await service.status();
       await service.profileStatus('claude', { id: 'work', configDir: '/work' });
       const before = spawns;
-      expect(service.peekStatus()?.providers).toHaveLength(6);
+      expect(service.peekStatus()?.providers).toHaveLength(PROVIDER_IDS.length);
       expect(service.peekProfileStatus('claude', 'work')?.profileId).toBe('work');
       expect(spawns).toBe(before);
     });

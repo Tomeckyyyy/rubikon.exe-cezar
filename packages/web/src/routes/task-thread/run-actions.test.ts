@@ -160,6 +160,7 @@ describe('resumeCommand — per backend, mirroring the server', () => {
     [undefined, 'claude --resume s1'], // legacy records predate the runner choice
     ['codex', 'codex resume s1'],
     ['opencode', 'opencode --session s1'],
+    ['junie', 'junie --resume --session-id=s1'],
     ['cursor', 'agent --resume s1'],
     // Each backend resumes with its OWN CLI — the old `default` branch handed these `claude`.
     ['pi', 'pi --session s1'],

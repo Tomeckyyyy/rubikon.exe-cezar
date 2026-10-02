@@ -2,7 +2,6 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { loadWorkspaceConfig, type WorkspaceConfig } from './workspace/config.ts';
-import { perRunner } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS } from './core/agent-runner.ts';
 
 /**
@@ -91,15 +90,18 @@ const configSchema = z.object({
    * `.catch(undefined)` keeps the key additive-safe like `systemPrompt`: a
    * bad value degrades to unset without discarding the rest of the config.
    */
-defaultModels: z
+  defaultModels: z
     .object({
       claude: z.string().trim().min(1).max(200).optional(),
       codex: z.string().trim().min(1).max(200).optional(),
       opencode: z.string().trim().min(1).max(200).optional(),
+      junie: z.string().trim().min(1).max(200).optional(),
       cursor: z.string().trim().min(1).max(200).optional(),
       pi: z.string().trim().min(1).max(200).optional(),
+      copilot: z.string().trim().min(1).max(200).optional(),
       gemini: z.string().trim().min(1).max(200).optional(),
-    })    .optional()
+    })
+    .optional()
     .catch(undefined),
   /**
    * Make each coding agent's native model setting authoritative. This is an
