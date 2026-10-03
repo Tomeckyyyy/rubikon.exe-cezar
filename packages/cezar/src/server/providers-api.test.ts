@@ -9,6 +9,7 @@ import {
   type ProviderId,
   type RunProviderCommand,
 } from '../core/provider-auth.ts';
+import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { RunStore } from '../runs/store.ts';
 import { defaultWorkspaceConfig, type WorkspaceConfig } from '../workspace/config.ts';
 import { RunManager } from '../workflows/run.ts';
@@ -749,7 +750,7 @@ describe('workspace provider API', () => {
     });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'provider must be claude, codex, opencode, cursor, pi, junie, copilot, or gemini' });
+    expect(await response.json()).toEqual({ error: `provider must be one of ${RUNNER_IDS.join(', ')}` });
   });
 
   it('never places request-controlled text in the opened command', async () => {

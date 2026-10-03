@@ -1933,7 +1933,7 @@ export function createApp(deps: ServerDeps) {
       },
     )
 
-    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, cursor, pi, junie, copilot, or gemini' }), async (c) => {
+    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: `provider must be one of ${RUNNER_IDS.join(', ')}` }), async (c) => {
       const body = { data: c.req.valid('json') };
 
       const provider = body.data.provider as ProviderId;

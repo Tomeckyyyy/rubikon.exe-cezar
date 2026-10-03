@@ -451,8 +451,11 @@ A new backend is a **single class behind the seam** plus its mapper, fixtures an
 the parity row — never backend-specific types leaking past
 `packages/cezar/src/core/`. PR #387 added `pi` and enumerated every place the
 runner union was duplicated; that list is the concrete map, and the union now
-derives from one `RUNNER_IDS` tuple in `agent-runner.ts` so most of it is
-typecheck-enforced rather than hand-tracked.
+derives from one tuple — the contract's `runnerSchema` in
+`packages/contract/src/health.ts`, which `agent-runner.ts` re-exports as `RUNNER_IDS` — so most
+of it is typecheck-enforced rather than hand-tracked, and
+`packages/cezar/src/core/runner-union.test.ts` fails on any source file that spells the set
+out again.
 
 To be first-class:
 
@@ -460,9 +463,9 @@ To be first-class:
    `AgentSession` (persistent process; `pid`; `sendMessage`/`end`/`interrupt`;
    `result`). Honor `AgentRunSpec` uniformly — use `prependSystemPrompt` if the
    backend has no native system-prompt channel.
-2. **Factory** — add the id to `RunnerId` / `RUNNER_IDS` (`agent-runner.ts`), to the contract's
-   `runnerSchema` (`packages/contract/src/health.ts` — `packages/contract/src/runners.ts` derives
-   its `RUNNER_IDS` / `perRunner` from it), and
+2. **Factory** — add the id to the contract's `runnerSchema` (`packages/contract/src/health.ts`;
+   `packages/contract/src/runners.ts` derives `RUNNER_IDS` / `perRunner` from it and
+   `agent-runner.ts` re-exports `RUNNER_IDS` / `RunnerId` — nothing else lists the set), and
    a `case` in `createRunner` (`runner-factory.ts`). Add `UiBackend` in
    `ui-events.ts` **and its mirror** `packages/api-client/src/protocol/ui-events.ts` (the
    type-exactness test guards drift).
