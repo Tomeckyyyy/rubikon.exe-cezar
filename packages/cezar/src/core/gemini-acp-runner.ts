@@ -27,6 +27,7 @@ import {
 } from './gemini-ui-mapper.ts';
 import { geminiResumeWaitMs, pruneGeminiResumeShells } from './gemini-sessions.ts';
 import type { UiEvent } from './ui-events.ts';
+import { V1TextCoalescer } from './v1-text-coalescer.ts';
 
 const DEFAULT_TIMEOUT_MS = 30 * 60_000;
 /** `initialize` / `session/new` / `session/load` are handshakes: bounded, unlike a prompt. */
@@ -132,6 +133,13 @@ class GeminiAcpSession implements AgentSession {
   private replayDone: (() => void) | null = null;
 
   private readonly textChunks: string[] = [];
+  /** v1 `text` is one event per WHOLE message item (v2 keeps the deltas): the run manager joins
+   *  v1 blocks with newlines before matching `CEZ:DONE`, so a marker split across chunks would
+   *  never match and every turn would be nudged to "continue". */
+  private readonly textCoalescer = new V1TextCoalescer((text) => {
+    this.textChunks.push(text);
+    this.emit({ type: 'text', text });
+  });
   private readonly toolCalls: AgentToolCallRecord[] = [];
   private tokensUsed = 0;
   private readonly stderr: string[] = [];
@@ -229,6 +237,8 @@ class GeminiAcpSession implements AgentSession {
     for (const timer of this.timers) clearTimeout(timer);
     if (this.autoEndTimer) clearTimeout(this.autoEndTimer);
     this.isOpen = false;
+    // A lost transport or an abort may leave a message item that never completed.
+    this.textCoalescer.flush();
 
     if (this.spawnError) throw this.spawnError;
     if (this.turnInFlight) {
@@ -362,6 +372,7 @@ class GeminiAcpSession implements AgentSession {
     if (!this.turnInFlight) return;
     this.turnInFlight = false;
     this.turnsCompleted += 1;
+    this.textCoalescer.flush();
     this.emit({ type: 'turn-end' });
     if (this.queue.length > 0) {
       this.pump();
@@ -397,10 +408,7 @@ class GeminiAcpSession implements AgentSession {
   private v1FromUi(event: UiEvent): void {
     switch (event.type) {
       case 'item.delta':
-        if (event.field === 'text') {
-          this.textChunks.push(event.delta);
-          this.emit({ type: 'text', text: event.delta });
-        }
+        if (event.field === 'text') this.textCoalescer.append(event.itemId, event.delta);
         return;
       case 'item.started':
         if (event.item.kind === 'tool') {
@@ -410,6 +418,7 @@ class GeminiAcpSession implements AgentSession {
         }
         return;
       case 'item.completed':
+        if (event.item.kind === 'message' && event.item.role === 'assistant') this.textCoalescer.complete(event.item.id, event.item.text);
         if (event.item.kind === 'tool') {
           const failed = event.item.status === 'failed' || event.item.status === 'declined';
           this.emit({

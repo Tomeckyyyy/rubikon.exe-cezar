@@ -64,6 +64,10 @@ describe('GeminiAcpRunner — one turn over the mock', () => {
     const types = c.events.map((e) => e.type);
     expect(types).toContain('session');
     expect(types).toContain('text');
+    // One v1 text event per message item, not per `agent_message_chunk` (the mock sends two):
+    // the run manager matches `CEZ:DONE` on newline-joined v1 blocks, so a split marker would
+    // never match and every turn would be nudged to continue.
+    expect(c.events.filter((e) => e.type === 'text').map((e) => e.text)).toEqual(['Investigating: fix the login redirect']);
     expect(types).toContain('tool-call');
     expect(types).toContain('tool-result');
     expect(types).toContain('token-usage');
