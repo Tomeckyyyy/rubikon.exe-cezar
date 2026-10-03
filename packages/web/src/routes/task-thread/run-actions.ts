@@ -44,6 +44,7 @@ const RESUME_COMMAND_PREFIX: Record<Runner, string> = {
   // Junie names the session by flag, not positionally — handled in resumeCommand.
   junie: 'junie --resume',
   pi: 'pi --session',
+  gemini: 'gemini --resume',
   copilot: 'copilot --resume',
   omp: 'omp --resume',
 }

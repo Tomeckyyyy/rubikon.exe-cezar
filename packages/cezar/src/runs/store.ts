@@ -388,6 +388,29 @@ export type StepState = z.infer<typeof stepStateSchema>;
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;
 
+/** The fields needed to retain, order and delete a record written by a newer cezar. */
+const salvageHeaderSchema = z.object({
+  id: z.string(),
+  createdAt: z.string(),
+  archived: z.boolean().default(false),
+});
+
+interface SalvagedRecord extends z.infer<typeof salvageHeaderSchema> {
+  /** The parsed JSON element exactly as it appeared, including fields this version does not know. */
+  raw: unknown;
+}
+
+interface PersistedIndexEntry {
+  id: string;
+  createdAt: string;
+  archived: boolean;
+  raw: unknown;
+}
+
+function comparePersistedEntries(a: Pick<PersistedIndexEntry, 'id' | 'createdAt'>, b: Pick<PersistedIndexEntry, 'id' | 'createdAt'>): number {
+  return b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id);
+}
+
 /** One persisted event line; `type` mirrors AgentEvent plus engine lifecycle. */
 export interface RunEvent {
   seq: number;
@@ -816,6 +839,8 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
  */
 export class RunStore extends EventEmitter {
   private runs = new Map<string, RunRecord>();
+  /** Newer/unknown records kept byte-for-field through saves but hidden from typed read APIs. */
+  private salvaged = new Map<string, SalvagedRecord>();
   /** Ids this process removed on purpose — see `forget`, which is the only thing that writes it. */
   private forgotten = new Set<string>();
   private saveTimer: NodeJS.Timeout | null = null;
@@ -843,13 +868,30 @@ export class RunStore extends EventEmitter {
     if (existsSync(indexPath)) {
       try {
         const raw = JSON.parse(readFileSync(indexPath, 'utf8'));
-        const parsed = z.array(runRecordSchema).safeParse(raw);
-        if (parsed.success) {
-          for (const run of parsed.data) {
-            store.runs.set(run.id, reconcileLoadedRun(run, opts));
-          }
+        if (!Array.isArray(raw)) {
+          store.indexReadHealth = { state: 'unavailable', omittedRuns: 0, reason: 'Task index could not be loaded by this server' };
         } else {
-          store.indexReadHealth = { state: 'unavailable', omittedRuns: Array.isArray(raw) ? raw.length : 0, reason: 'Task index could not be loaded by this server' };
+          let dropped = 0;
+          for (const entry of raw) {
+            const parsed = runRecordSchema.safeParse(entry);
+            if (parsed.success) {
+              store.salvaged.delete(parsed.data.id);
+              store.runs.set(parsed.data.id, reconcileLoadedRun(parsed.data, opts));
+              continue;
+            }
+            const header = salvageHeaderSchema.safeParse(entry);
+            if (header.success && !store.runs.has(header.data.id)) {
+              store.salvaged.set(header.data.id, { ...header.data, raw: entry });
+            } else {
+              dropped++;
+            }
+          }
+          const preserved = store.salvaged.size;
+          if (preserved > 0 || dropped > 0) {
+            const reason = `Task index contains ${preserved} record${preserved === 1 ? '' : 's'} preserved unread and ${dropped} unaddressable record${dropped === 1 ? '' : 's'} dropped`;
+            store.indexReadHealth = { state: 'unavailable', omittedRuns: preserved + dropped, reason };
+            console.warn(`[cez] ${reason}`);
+          }
         }
       } catch {
         store.indexReadHealth = { state: 'unavailable', omittedRuns: 0, reason: 'Task index could not be loaded by this server' };
@@ -1604,11 +1646,16 @@ export class RunStore extends EventEmitter {
    *  which is exactly how long a deletion has to outlive its own index entry. */
   private forget(id: string): boolean {
     this.forgotten.add(id);
-    return this.runs.delete(id);
+    const live = this.runs.delete(id);
+    const salvaged = this.salvaged.delete(id);
+    return live || salvaged;
   }
 
   private pruneOldRuns(): void {
-    const all = this.listRuns();
+    const all = [
+      ...this.listRuns().map((run) => ({ id: run.id, createdAt: run.createdAt, archived: run.archived })),
+      ...this.salvaged.values(),
+    ].sort(comparePersistedEntries);
     const stalePool = [
       ...all.filter((r) => !r.archived).slice(MAX_RUNS_KEPT),
       ...all.filter((r) => r.archived).slice(MAX_ARCHIVED_KEPT),
@@ -1672,12 +1719,14 @@ export class RunStore extends EventEmitter {
    * owns it. An index that cannot be read contributes nothing rather than costing us our own runs,
    * exactly as in `open()`.
    */
-  private mergeWithIndexOnDisk(indexPath: string): RunRecord[] {
-    const mine = this.listRuns();
+  private mergeWithIndexOnDisk(indexPath: string): unknown[] {
+    const mine: PersistedIndexEntry[] = [
+      ...this.listRuns().map((run) => ({ id: run.id, createdAt: run.createdAt, archived: run.archived, raw: run })),
+      ...this.salvaged.values(),
+    ];
     const foreign = this.foreignRecordsOnDisk(indexPath);
-    if (foreign.length === 0) return mine;
-    // Same ordering rule `listRuns` applies, so the file's shape is unchanged.
-    return [...mine, ...foreign].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    // Same primary ordering rule `listRuns` applies; id makes equal timestamps deterministic.
+    return [...mine, ...foreign].sort(comparePersistedEntries).map((entry) => entry.raw);
   }
 
   /**
@@ -1694,7 +1743,7 @@ export class RunStore extends EventEmitter {
    * left, which is normally nothing. Per-record also degrades better than `open()` can afford to:
    * one unreadable row costs only itself instead of every foreign record in the file.
    */
-  private foreignRecordsOnDisk(indexPath: string): RunRecord[] {
+  private foreignRecordsOnDisk(indexPath: string): PersistedIndexEntry[] {
     if (!existsSync(indexPath)) return [];
     let raw: unknown;
     try {
@@ -1703,12 +1752,22 @@ export class RunStore extends EventEmitter {
       return []; // not JSON — an index we cannot read contributes nothing, and costs us nothing
     }
     if (!Array.isArray(raw)) return [];
-    const foreign: RunRecord[] = [];
+    const foreign: PersistedIndexEntry[] = [];
     for (const entry of raw) {
       const id: unknown = (entry as { id?: unknown } | null)?.id;
-      if (typeof id !== 'string' || this.runs.has(id) || this.forgotten.has(id)) continue;
+      if (typeof id !== 'string' || this.runs.has(id) || this.salvaged.has(id) || this.forgotten.has(id)) continue;
       const parsed = runRecordSchema.safeParse(entry);
-      if (parsed.success) foreign.push(parsed.data);
+      if (parsed.success) {
+        foreign.push({
+          id: parsed.data.id,
+          createdAt: parsed.data.createdAt,
+          archived: parsed.data.archived,
+          raw: parsed.data,
+        });
+        continue;
+      }
+      const header = salvageHeaderSchema.safeParse(entry);
+      if (header.success) foreign.push({ ...header.data, raw: entry });
     }
     return foreign;
   }

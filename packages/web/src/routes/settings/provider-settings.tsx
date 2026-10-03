@@ -8,39 +8,50 @@ import {
   useRetryProviderAuth,
   workspaceQueryKeys,
 } from '@/api/queries'
-import type { ProviderId, ProviderStatusResponse } from '@open-mercato/cezar-api-client'
+import { RUNNER_IDS, type ProviderId, type ProviderStatusResponse } from '@open-mercato/cezar-api-client'
 import { StatusDot, type StatusDotTone } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { providerStatusFor } from '@/lib/provider-status'
 
+/**
+ * `explainsUnknown`: for most agents `unknown` means the check itself failed, so the card offers a
+ * retry. Gemini CLI has no auth-status command: its `unknown` means "no credential cezar can see",
+ * and the server's hint (API key / Vertex / Workspace — Google sign-in no longer works) is the
+ * actionable part (#581), so the card shows it instead.
+ */
 /** The provider cards this pane renders, in order. Exported so tests count them from the
  *  source of truth rather than from a literal that a new runner silently invalidates. */
-export const PROVIDERS = [
-  { id: 'claude', label: 'Claude Code', login: 'claude auth login' },
-  { id: 'codex', label: 'Codex', login: 'codex login' },
-  { id: 'junie', label: 'Junie', login: 'junie login' },
-  { id: 'opencode', label: 'OpenCode', login: 'opencode auth login' },
-  { id: 'cursor', label: 'Cursor', login: 'agent login' },
-  { id: 'pi', label: 'pi', login: 'pi /login' },
-  { id: 'copilot', label: 'GitHub Copilot CLI', login: 'copilot login' },
+interface ProviderDescriptor {
+  id: ProviderId
+  label: string
+  login: string
+}
+
+const PROVIDER_DESCRIPTORS: Record<ProviderId, Omit<ProviderDescriptor, 'id'> & { order: number }> = {
+  claude: { label: 'Claude Code', login: 'claude auth login', order: 0 },
+  codex: { label: 'Codex', login: 'codex login', order: 1 },
+  junie: { label: 'Junie', login: 'junie login', order: 2 },
+  opencode: { label: 'OpenCode', login: 'opencode auth login', order: 3 },
+  cursor: { label: 'Cursor', login: 'agent login', order: 4 },
+  pi: { label: 'pi', login: 'pi /login', order: 5 },
+  copilot: { label: 'GitHub Copilot CLI', login: 'copilot login', order: 6 },
+  // No login subcommand: `/auth` inside the interactive CLI, or GEMINI_API_KEY in the environment.
+  gemini: { label: 'Gemini CLI', login: 'gemini', order: 7 },
   // omp has no auth-status command: its `unknown` means "no credential cezar can see" (the login
   // lives in omp's own agent.db), and the server's hint — run `omp` once and log in, or export a
   // provider key — is what the card's hint-first `unknown` rendering below shows.
-  { id: 'omp', label: 'OMP', login: 'omp' },
-] as const
+  omp: { label: 'OMP', login: 'omp', order: 8 },
+}
 
-const providerWriteState = <T,>(value: T): Record<ProviderId, T> => ({
-  claude: value,
-  codex: value,
-  junie: value,
-  opencode: value,
-  cursor: value,
-  pi: value,
-  copilot: value,
-  omp: value,
-})
+export const PROVIDERS: readonly ProviderDescriptor[] = RUNNER_IDS
+  .map((id) => ({ id, ...PROVIDER_DESCRIPTORS[id] }))
+  .sort((left, right) => left.order - right.order)
+  .map(({ order: _order, ...provider }) => provider)
+
+const providerWriteState = <T,>(value: T): Record<ProviderId, T> =>
+  Object.fromEntries(RUNNER_IDS.map((provider) => [provider, value])) as Record<ProviderId, T>
 
 const STATUS_PRESENTATION = {
   connected: { label: 'Credentials found', tone: 'success' },

@@ -1,6 +1,7 @@
 import { ChevronDownIcon, SettingsIcon } from 'lucide-react'
 import { Link } from '@/lib/project-router'
 
+import { RUNNER_IDS } from '@open-mercato/cezar-api-client'
 import type { BackendCheck, HealthResponse, Runner } from '@open-mercato/cezar-api-client'
 import { StatusDot } from '@/components/status-dot'
 import {
@@ -24,15 +25,11 @@ import {
  */
 
 /** The agent CLIs among `checks[]` — the tools a task actually needs one of. `gh` and `git` are
- *  the other rows; neither picks a runner. Spelled as an exhaustive `Record<Runner, true>` rather
- *  than a hand-kept list: the contract's runner enum is what `defaultRunner` is drawn from, so a
- *  new runner joining it (as `pi` did, #470, `cursor` did, #805, `copilot` did, #582, and `omp`
- *  did, #1139) must fail the typecheck here instead of quietly dropping out of the dot's idea of
- *  what can start a task. A type-level set, so no zod schema — and no zod — is pulled into the
- *  cockpit bundle for it. */
-const RUNNER_NAMES: Record<Runner, true> = { claude: true, codex: true, junie: true, opencode: true, cursor: true, pi: true, copilot: true, omp: true }
+ *  the other rows; neither picks a runner. Derived from the contract's canonical ids so adding a
+ *  runner cannot quietly drop it from the aggregate status. */
+const RUNNER_NAMES: ReadonlySet<string> = new Set(RUNNER_IDS)
 
-const isRunner = (check: BackendCheck): boolean => Object.hasOwn(RUNNER_NAMES, check.name)
+const isRunner = (check: BackendCheck): boolean => RUNNER_NAMES.has(check.name)
 
 /**
  * What (if anything) keeps the aggregate dot from green. Only two things do: having no agent

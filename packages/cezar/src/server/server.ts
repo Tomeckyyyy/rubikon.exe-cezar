@@ -57,12 +57,13 @@ import {
   modelDiscoveryRunnerSchema,
   openProjectInSchema,
   updateProjectInputSchema,
+  perRunner,
 } from '@open-mercato/cezar-contract';
 import { dispatchInputSchema, dispatchIntentSchema, dispatchReportSchema } from '@open-mercato/cezar-contract';
 import { detectEnvironment } from '../core/backend-detect.ts';
 import { hostUsageSampler, type HostSampler } from '../core/host-usage.ts';
-import { RUNNER_IDS } from '../core/agent-runner.ts';
-import type { ContentBlock, RunnerId } from '../core/agent-runner.ts';
+import { RUNNER_IDS, isRunnerId, type RunnerId } from '../core/agent-runner.ts';
+import type { ContentBlock } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
 import { discoverClaudeModels } from '../core/claude-model-catalog.ts';
 import { discoverCodexModels } from '../core/codex-model-catalog.ts';
@@ -3247,17 +3248,7 @@ export function createApp(deps: ServerDeps) {
     agentDefaults: z
       .object({
         runner: z.enum(PROVIDER_IDS).nullable().optional(),
-        models: z
-          .object({
-            claude: z.string().trim().min(1).max(200).nullable().optional(),
-            codex: z.string().trim().min(1).max(200).nullable().optional(),
-            opencode: z.string().trim().min(1).max(200).nullable().optional(),
-            cursor: z.string().trim().min(1).max(200).nullable().optional(),
-            pi: z.string().trim().min(1).max(200).nullable().optional(),
-            junie: z.string().trim().min(1).max(200).nullable().optional(),
-            copilot: z.string().trim().min(1).max(200).nullable().optional(),
-            omp: z.string().trim().min(1).max(200).nullable().optional(),
-          })
+        models: perRunner(z.string().trim().min(1).max(200).nullable().optional())
           .optional(),
       })
       .optional(),
@@ -6054,10 +6045,7 @@ export function createApp(deps: ServerDeps) {
     baseBranch: z.string().trim().min(1).max(200).nullable().optional(),
     defaultRunner: z.enum(RUNNER_IDS).optional(),
     systemPrompt: z.string().trim().max(20_000, 'must be at most 20000 characters').nullable().optional(),
-    // One key per runner, derived: a runner missing here is stripped by zod silently, so the
-    // request answers 200 and saves nothing (junie and copilot were, until the per-runner test).
-    defaultModels: z
-      .object(Object.fromEntries(RUNNER_IDS.map((runner) => [runner, modelPresetSchema])) as Record<RunnerId, typeof modelPresetSchema>)
+    defaultModels: perRunner(modelPresetSchema)
       .optional(),
     // Concurrency + memory guard (Settings → Resources). maxParallel clamps to
     // the schema's 1–16; memoryLimitMb null/0 clears the ceiling.
@@ -6713,33 +6701,27 @@ export function quoteResumeBin(bin: string): string | null {
  * guarantee than escaping, and platform-independent. Ids are UUID/CLI-minted
  * today; this keeps a future source safe.
  */
+const RESUME_COMMANDS: Record<RunnerId, (sessionId: string) => string | null> = {
+  claude: (id) => `claude --resume ${id}`,
+  codex: (id) => `codex resume ${id}`,
+  opencode: (id) => `opencode --session ${id}`,
+  cursor: (id) => {
+    const bin = quoteResumeBin(process.env.CEZ_CURSOR_AGENT_BIN ?? 'agent');
+    return bin === null ? null : `${bin} --resume ${id}`;
+  },
+  pi: (id) => `pi --session ${id}`,
+  // Junie's positional argument is a task; only --session-id selects the intended session.
+  junie: (id) => `junie --resume --session-id=${id}`,
+  copilot: (id) => `copilot --resume ${id}`,
+  // Gemini's ACP session id is the id accepted by its native chat recording resume command.
+  gemini: (id) => `gemini --resume ${id}`,
+  // The RPC session id is omp's own session id, which `--resume` accepts
+  // (`omp --mode rpc --resume <id>` spawns the same process resumed).
+  omp: (id) => `omp --resume ${id}`,
+};
+
 export function resumeCommand(runner: string | undefined, sessionId: string): string | null {
   if (!isSafeSessionId(sessionId)) return null;
-  switch (runner) {
-    case 'junie':
-      // Verified live (`junie --help`, 26.9.22): `--resume` alone reopens the LAST session;
-      // the target session is named by the separate `--session-id=<id>` flag, not a positional
-      // argument (junie's positional slot is `[<task>]`) — `junie --resume ${sessionId}` would
-      // silently resume the wrong session and read the id as a task prompt instead.
-      return `junie --resume --session-id=${sessionId}`;
-    case 'codex':
-      return `codex resume ${sessionId}`;
-    case 'opencode':
-      return `opencode --session ${sessionId}`;
-    case 'cursor': {
-      const bin = quoteResumeBin(process.env.CEZ_CURSOR_AGENT_BIN ?? 'agent');
-      return bin === null ? null : `${bin} --resume ${sessionId}`;
-    }
-    case 'pi':
-      return `pi --session ${sessionId}`;
-    case 'copilot':
-      // `--resume <id>` takes a session id, a task id or an id prefix (`copilot --help`, 1.0.88).
-      return `copilot --resume ${sessionId}`;
-    case 'omp':
-      // The RPC session id is omp's own session id, which `--resume` accepts
-      // (`omp --mode rpc --resume <id>` spawns the same process resumed).
-      return `omp --resume ${sessionId}`;
-    default:
-      return `claude --resume ${sessionId}`;
-  }
+  const id = runner === undefined || runner === 'claude-cli' ? 'claude' : runner;
+  return isRunnerId(id) ? RESUME_COMMANDS[id](sessionId) : null;
 }

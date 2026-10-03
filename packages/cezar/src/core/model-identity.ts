@@ -119,6 +119,9 @@ export const BACKEND_MODEL_MAP: Readonly<Record<AgentBackend, BackendModelMap>> 
   // the run (#405's invariant). Rejecting a bare id the way opencode and pi do would reject the
   // only form Copilot accepts.
   copilot: { defaultProvider: 'github' },
+  // Gemini CLI serves Google's models only; a bare id (`gemini-3-flash-preview`) is Google's and
+  // goes to `--model` bare (#581).
+  gemini: { defaultProvider: 'google' },
   // omp is pi's successor and selects across providers with the same
   // `provider/model` convention — no default provider, so a bare model is
   // rejected loudly and the full id goes to `--model`.

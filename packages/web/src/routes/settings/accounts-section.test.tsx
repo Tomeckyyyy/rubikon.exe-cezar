@@ -8,6 +8,7 @@ import { createQueryClient } from '@/api/query-client'
 import type { AgentProfile, AgentProfilesResponse } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { AppRoutes } from '@/routes'
+import { RUNNERS } from '@/routes/new-task-form'
 
 /**
  * Global settings → Agent accounts (spec `.ai/specs/2026-07-29-agent-profiles.md`).
@@ -755,7 +756,7 @@ describe('the agent accounts section', () => {
       [...document.querySelectorAll('[data-slot="accounts-tabs"] [data-provider]')].map((el) =>
         el.getAttribute('data-provider'),
       ),
-    ).toEqual(['claude', 'codex', 'junie', 'opencode', 'cursor', 'pi', 'copilot', 'omp'])
+    ).toEqual(RUNNERS.map(({ id }) => id))
   })
 
   it('offers no Add on an agent that cannot carry a second account, and says why', async () => {

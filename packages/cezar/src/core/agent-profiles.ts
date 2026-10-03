@@ -51,6 +51,9 @@ import type { ProviderId } from './provider-auth.ts';
  *   `GITHUB_TOKEN` ahead of any stored credential regardless. `null` until a test proves one
  *   variable moves both (spec 2026-09-19-runner-seam-native-backends Q14) — being wrong here
  *   bills the wrong account.
+ * - **gemini** → `null` for now (spec 2026-09-19 Q14). `GEMINI_CLI_HOME` relocates `.gemini`, but
+ *   on 2026-09-19 a fresh `GEMINI_CLI_HOME` (and even a fresh `HOME`) still authenticated with the
+ *   stored API key (`__fixtures__/gemini/README.md`), so it does not provably move credentials.
  * - **omp** → `PI_CODING_AGENT_DIR`. OMP owns this variable despite the legacy `PI_` spelling it
  *   inherited as pi's fork: `omp --help` (verified against the installed 18.4.2) documents it as
  *   the agent dir, default `~/.omp/agent`, and that dir holds `config.yml` AND the auth store
@@ -68,6 +71,7 @@ export const PROFILE_ENV_VAR: Record<ProviderId, string | null> = {
   pi: null,
   junie: null,
   copilot: null,
+  gemini: null,
   omp: 'PI_CODING_AGENT_DIR',
 };
 
@@ -127,6 +131,8 @@ const PROFILE_DIR_MARKERS: Record<ProviderId, readonly string[]> = {
   junie: [],
   // Same for copilot (`PROFILE_ENV_VAR.copilot === null`).
   copilot: [],
+  // Same as pi: `PROFILE_ENV_VAR.gemini === null`, kept only for exhaustiveness.
+  gemini: [],
   // `PI_CODING_AGENT_DIR` moves the whole base; `config.yml` + `agent.db` are its signature files.
   omp: ['config.yml', 'agent.db'],
 };

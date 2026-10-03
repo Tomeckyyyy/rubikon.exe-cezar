@@ -447,13 +447,14 @@ export function useRunnerModelCatalogs(
 ): Record<Runner, ReturnType<typeof useRunnerModels>> {
   const claude = useRunnerModels('claude', enabled)
   const codex = useRunnerModels('codex', enabled)
+  const junie = useRunnerModels('junie', enabled)
   const opencode = useRunnerModels('opencode', enabled)
   const cursor = useRunnerModels('cursor', enabled)
   const pi = useRunnerModels('pi', enabled)
-  const junie = useRunnerModels('junie', enabled)
   const copilot = useRunnerModels('copilot', enabled)
+  const gemini = useRunnerModels('gemini', enabled)
   const omp = useRunnerModels('omp', enabled)
-  return { claude, codex, junie, opencode, cursor, pi, copilot, omp }
+  return { claude, codex, junie, opencode, cursor, pi, copilot, gemini, omp }
 }
 
 export function useProviderStatus() {

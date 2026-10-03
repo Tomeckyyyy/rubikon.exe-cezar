@@ -14,6 +14,12 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/components/ui/toaster'
 
+/** Example second config folder per provider — the providers whose dir is not `~/.<name>`. */
+const CONFIG_DIR_PLACEHOLDERS: Partial<Record<ProviderId, string>> = {
+  codex: '~/.codex-second',
+  omp: '~/.omp/agent-second',
+}
+
 /**
  * "Add agent account" (spec 2026-07-29-agent-profiles): point a provider at a second config
  * folder, so a work login can sit beside a personal one.
@@ -142,7 +148,7 @@ export function AddAccountDialog({
               aria-label="Config folder"
               data-slot="add-account-dir"
               value={configDir}
-              placeholder={provider === 'codex' ? '~/.codex-second' : provider === 'omp' ? '~/.omp/agent-second' : '~/.claude-second'}
+              placeholder={CONFIG_DIR_PLACEHOLDERS[provider] ?? '~/.claude-second'}
               onChange={(event) => {
                 setConfigDir(event.target.value)
                 setSelected(null)

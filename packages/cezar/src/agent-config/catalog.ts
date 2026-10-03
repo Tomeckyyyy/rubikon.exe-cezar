@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { RunnerId } from '../core/agent-runner.ts';
+import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 
 /**
  * The catalog of coding-agent config files cezar can surface and edit (spec
@@ -39,6 +39,8 @@ export interface AgentHomePaths {
   copilot: string;
   /** `~/.junie` — no relocation var documented (see `PROFILE_ENV_VAR.junie`) */
   junie: string;
+  /** `$GEMINI_CLI_HOME/.gemini` or `~/.gemini` */
+  gemini: string;
   /** `$PI_CODING_AGENT_DIR` (the whole agent dir) or `~/.omp/agent` */
   omp: string;
 }
@@ -87,6 +89,10 @@ const COPILOT_CONFIG_DOCS = 'https://docs.github.com/en/copilot/how-tos/copilot-
 const COPILOT_MCP_DOCS = 'https://docs.github.com/en/copilot/how-tos/copilot-cli#mcp-servers';
 const COPILOT_INSTRUCTIONS_DOCS =
   'https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions-for-github-copilot';
+// Gemini CLI ships its docs in the npm package (`docs/`); these are the same files upstream.
+// Verified against the bundled copies in @google/gemini-cli 0.60.0, 2026-09-19 (#581).
+const GEMINI_CONFIG_DOCS = 'https://github.com/google-gemini/gemini-cli/blob/main/docs/reference/configuration.md';
+const GEMINI_MEMORY_DOCS = 'https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/gemini-md.md';
 // OMP ships its docs in the CLI; the published copies live on omp.sh (verified 2026-09-28).
 const OMP_CONFIG_DOCS = 'https://omp.sh/docs/settings';
 const OMP_MEMORY_DOCS = 'https://omp.sh/docs/context-files';
@@ -438,6 +444,66 @@ export const CONFIG_FILES: ConfigFileDef[] = [
     holdsMcp: true,
     precedence: 'Project-scoped MCP servers for Cursor Agent CLI, shared via version control.',
     docsUrl: CURSOR_CLI_CONFIG_DOCS,
+  },
+
+  // ---- Gemini CLI ----
+  {
+    id: 'gemini.user.settings',
+    runners: ['gemini'],
+    kind: 'settings',
+    scope: 'user',
+    resolve: (_repo, home) => join(home.gemini, 'settings.json'),
+    label: '~/.gemini/settings.json',
+    format: 'json',
+    tracked: 'outside-repo',
+    holdsMcp: true,
+    modelKey: 'model.name',
+    modelPriority: 1,
+    precedence:
+      'Applies to all Gemini CLI sessions for the current user. User settings override system defaults; project settings, the system settings file, environment variables and command-line arguments override them. MCP servers live under "mcpServers".',
+    docsUrl: GEMINI_CONFIG_DOCS,
+  },
+  {
+    id: 'gemini.project.settings',
+    runners: ['gemini'],
+    kind: 'settings',
+    scope: 'project',
+    resolve: (repo) => join(repo, '.gemini', 'settings.json'),
+    label: '.gemini/settings.json',
+    format: 'json',
+    tracked: 'tracked',
+    holdsMcp: true,
+    modelKey: 'model.name',
+    modelPriority: 2,
+    precedence:
+      'Applies only when running Gemini CLI from that specific project. Project settings override user settings and system defaults. MCP servers live under "mcpServers". Runs read the committed copy.',
+    docsUrl: GEMINI_CONFIG_DOCS,
+  },
+  {
+    id: 'gemini.user.memory',
+    runners: ['gemini'],
+    kind: 'memory',
+    scope: 'user',
+    resolve: (_repo, home) => join(home.gemini, 'GEMINI.md'),
+    label: '~/.gemini/GEMINI.md',
+    format: 'markdown',
+    tracked: 'outside-repo',
+    precedence:
+      'Global context file: provides default instructions for all your projects. Loaded first; GEMINI.md files found in the workspace and its parent directories are concatenated after it.',
+    docsUrl: GEMINI_MEMORY_DOCS,
+  },
+  {
+    id: 'gemini.project.memory',
+    runners: ['gemini'],
+    kind: 'memory',
+    scope: 'project',
+    resolve: (repo) => join(repo, 'GEMINI.md'),
+    label: 'GEMINI.md',
+    format: 'markdown',
+    tracked: 'tracked',
+    precedence:
+      'The CLI searches for GEMINI.md files in your configured workspace directories and their parent directories, and concatenates them after the global ~/.gemini/GEMINI.md. Runs read the committed copy.',
+    docsUrl: GEMINI_MEMORY_DOCS,
   },
 
   // ---- OMP (pi's successor; cezar's `omp` runner drives its `--mode rpc`) ----

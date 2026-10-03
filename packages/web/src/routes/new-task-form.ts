@@ -1,7 +1,7 @@
 // A contract VALUE, not a type: which runners cezar can interrogate for a live catalog is decided
 // once, by the schema `GET /api/v1/models` validates with, so the picker and the route cannot
 // disagree about who has discovery. It narrows `Runner` to `ModelDiscoveryRunner`.
-import { runnerDiscoversModels } from '@open-mercato/cezar-api-client'
+import { RUNNER_IDS, runnerDiscoversModels } from '@open-mercato/cezar-api-client'
 import type {
   BackendCheck,
   CreateRunInput,
@@ -48,16 +48,22 @@ export interface RunnerOption {
 
 /** The agent-backend catalog (legacy `RUNNERS`). Installation-only compatibility surfaces use
  *  `availableRunners`; the new-task composer filters this catalog by connected provider status. */
-export const RUNNERS: readonly RunnerOption[] = [
-  { id: 'claude', label: 'claude', desc: 'Claude Code CLI' },
-  { id: 'codex', label: 'codex', desc: 'OpenAI Codex (app-server)' },
-  { id: 'junie', label: 'junie', desc: 'JetBrains Junie CLI' },
-  { id: 'opencode', label: 'opencode', desc: 'OpenCode (serve)' },
-  { id: 'cursor', label: 'cursor', desc: 'Cursor Agent CLI' },
-  { id: 'pi', label: 'pi', desc: 'pi CLI (provider/model)' },
-  { id: 'copilot', label: 'copilot', desc: 'GitHub Copilot CLI (ACP)' },
-  { id: 'omp', label: 'omp', desc: 'OMP (RPC)' },
-]
+const RUNNER_OPTIONS: Record<Runner, Omit<RunnerOption, 'id'> & { order: number }> = {
+  claude: { label: 'claude', desc: 'Claude Code CLI', order: 0 },
+  codex: { label: 'codex', desc: 'OpenAI Codex (app-server)', order: 1 },
+  junie: { label: 'junie', desc: 'JetBrains Junie CLI', order: 2 },
+  opencode: { label: 'opencode', desc: 'OpenCode (serve)', order: 3 },
+  cursor: { label: 'cursor', desc: 'Cursor Agent CLI', order: 4 },
+  pi: { label: 'pi', desc: 'pi CLI (provider/model)', order: 5 },
+  copilot: { label: 'copilot', desc: 'GitHub Copilot CLI (ACP)', order: 6 },
+  gemini: { label: 'gemini', desc: 'Gemini CLI (ACP)', order: 7 },
+  omp: { label: 'omp', desc: 'OMP (RPC)', order: 8 },
+}
+
+export const RUNNERS: readonly RunnerOption[] = RUNNER_IDS
+  .map((id) => ({ id, ...RUNNER_OPTIONS[id] }))
+  .sort((left, right) => left.order - right.order)
+  .map(({ order: _order, ...runner }) => runner)
 
 export interface ModelPreset {
   id: string
@@ -109,6 +115,15 @@ export const MODELS_BY_RUNNER: Record<Runner, readonly ModelPreset[]> = {
   copilot: [
     { id: '', label: 'auto', desc: 'Let Copilot pick the model' },
   ],
+  // Gemini CLI has no host catalog in cezar: the ids its ACP `session/new` answer lists (0.60), the
+  // server's `KNOWN_PRESETS_BY_RUNNER.gemini`. A free API key serves the Flash models only.
+  gemini: [
+    { id: '', label: 'auto', desc: 'Use your Gemini CLI default model' },
+    { id: 'gemini-3.5-flash', label: 'gemini-3.5-flash', desc: 'Fast; available on a free API key' },
+    { id: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview', desc: 'Preview Flash model' },
+    { id: 'gemini-3.1-flash-lite', label: 'gemini-3.1-flash-lite', desc: 'Fastest, cheapest' },
+    { id: 'gemini-2.5-pro', label: 'gemini-2.5-pro', desc: 'Deeper reasoning (paid tiers)' },
+  ],
   // omp is pi's successor: the same `provider/model` convention, no host catalog in cezar yet.
   // Presets are answered by the host's configured providers, so anything dated here would be one
   // release away from a model the user's provider does not serve — the shared `provider/model`
@@ -131,6 +146,7 @@ export const MODELS_BY_RUNNER: Record<Runner, readonly ModelPreset[]> = {
 const NATIVE_MODEL_ID_PREFIX: Partial<Record<Runner, RegExp>> = {
   claude: /^claude[-.]/,
   codex: /^gpt[-.]/,
+  gemini: /^gemini[-.]/,
 }
 
 /** Runners that pick with the canonical `provider/model` convention and span every provider the

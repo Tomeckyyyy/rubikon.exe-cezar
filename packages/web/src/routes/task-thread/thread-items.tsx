@@ -325,6 +325,7 @@ const PROVIDER_LABEL: Record<ThreadProviderAuthRequired['provider'], string> = {
   opencode: 'OpenCode',
   cursor: 'Cursor',
   pi: 'pi',
+  gemini: 'Gemini CLI',
   copilot: 'GitHub Copilot CLI',
   omp: 'OMP',
 }

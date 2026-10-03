@@ -44,7 +44,6 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { StatusDot, type StatusDotTone } from '@/components/status-dot'
-import { RUNNER_ORDER } from '@/lib/provider-status'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { toast } from '@/components/ui/toaster'
 import { OpenInMenu, cliTargetRunner } from '@/components/open-in-menu'
@@ -96,6 +95,7 @@ const PROVIDER_LABEL: Record<ProviderId, string> = {
   opencode: 'OpenCode',
   cursor: 'Cursor',
   pi: 'pi',
+  gemini: 'Gemini CLI',
   copilot: 'GitHub Copilot CLI',
   omp: 'OMP',
 }
@@ -108,6 +108,7 @@ const PROVIDER_INSTALL: Record<ProviderId, string> = {
   opencode: 'https://opencode.ai',
   cursor: 'curl https://cursor.com/install -fsS | bash',
   pi: 'https://github.com/badlogic/pi-mono',
+  gemini: 'npm i -g @google/gemini-cli',
   copilot: 'npm i -g @github/copilot',
   omp: 'brew install can1357/tap/omp',
 }
@@ -154,7 +155,7 @@ function AccountsPane({ data }: { data: AgentProfilesResponse }) {
   // install state and config folder live, and hiding OpenCode would just move the question
   // "is OpenCode set up?" somewhere else. Derived, not written out: as a literal this list went
   // stale the moment a fifth runner existed, and "every agent" quietly became "four of them".
-  const providers: readonly ProviderId[] = RUNNER_ORDER
+  const providers: readonly ProviderId[] = RUNNERS.map(({ id }) => id)
 
   if (!data.editable) {
     return (

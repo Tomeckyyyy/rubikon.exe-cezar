@@ -1,4 +1,4 @@
-import type { RunEvent, RunStatus, Runner } from '@open-mercato/cezar-api-client'
+import type { ProviderId, RunEvent, RunStatus } from '@open-mercato/cezar-api-client'
 import { runItemKey } from '@/api/run-events'
 import {
   runnerSchema,
@@ -71,7 +71,7 @@ export interface ThreadAsk {
 export interface ThreadProviderAuthRequired {
   kind: 'provider-auth-required'
   id: string
-  provider: Runner
+  provider: ProviderId
   authFailureId: string
 }
 

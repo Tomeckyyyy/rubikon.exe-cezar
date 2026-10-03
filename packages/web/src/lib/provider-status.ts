@@ -1,17 +1,22 @@
+import { RUNNER_IDS } from '@open-mercato/cezar-api-client'
 import type { ProviderStatus, ProviderStatusResponse, Runner } from '@open-mercato/cezar-api-client'
 
 /** The cockpit's canonical runner order, exported so a surface that renders one row per
- *  provider derives it instead of keeping a fifth hand-written copy — the copy in
- *  `accounts-section.tsx` silently dropped Copilot when #582 added it, and nothing in the
- *  type system noticed, because a `ProviderId[]` literal is under-wide, never wrong. Spelled
- *  as an exhaustive `Record<Runner, true>` (the `tools-menu.tsx` pattern) for the same reason:
- *  the server answers one row per contract runner, and a runner missing here made every real
- *  status response fail to parse — so a runner joining the contract fails the typecheck here
- *  instead of quietly leaving every provider at "Could not verify". */
-const RUNNER_ORDER_SET: Record<Runner, true> = {
-  claude: true, codex: true, junie: true, opencode: true, cursor: true, pi: true, copilot: true, omp: true,
+ *  provider derives it instead of keeping another hand-written copy. */
+const RUNNER_DISPLAY_PRIORITY: Record<Runner, number> = {
+  claude: 0,
+  codex: 1,
+  junie: 2,
+  opencode: 3,
+  cursor: 4,
+  pi: 5,
+  copilot: 6,
+  gemini: 7,
+  omp: 8,
 }
-export const RUNNER_ORDER: readonly Runner[] = Object.keys(RUNNER_ORDER_SET) as Runner[]
+
+export const RUNNER_ORDER: readonly Runner[] = [...RUNNER_IDS]
+  .sort((left, right) => RUNNER_DISPLAY_PRIORITY[left] - RUNNER_DISPLAY_PRIORITY[right])
 const PROVIDER_STATES = new Set(['connected', 'disconnected', 'not-installed', 'unknown'])
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -208,10 +208,10 @@ describe('cez automation', () => {
     const help = harness([]);
     expect(await runAutomationCommand(['help'], {}, help.io)).toBe(0);
     expect(help.out[0]).toContain('cez automation create');
-    // `--runner` advertises the runners that exist — derived, so it cannot name a `gemini`
+    // `--runner` advertises the runners that exist — derived, so it cannot name an `aider`
     // the server rejects or drop a `cursor` it accepts.
     expect(help.out[0]).toContain(`[--runner ${RUNNER_IDS.join('|')}]`);
-    expect(help.out[0]).not.toContain('gemini');
+    expect(help.out[0]).not.toContain('aider');
     const unknown = harness([]);
     expect(await runAutomationCommand(['frobnicate'], env, unknown.io)).toBe(2);
     expect(unknown.err[0]).toContain('unknown command "frobnicate"');

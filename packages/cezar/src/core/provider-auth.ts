@@ -1,3 +1,4 @@
+import { RUNNER_IDS } from './agent-runner.ts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -7,10 +8,13 @@ import { AGENT_MODELS_LOCKED_ENV } from './agent-model-policy.ts';
 import { profileEnv } from './agent-profiles.ts';
 import { resolveClaudeBin } from './claude-bin.ts';
 import { quoteExecutable, withEnvPrefix } from './shell-env.ts';
+import { geminiHasCredentials } from './gemini-credentials.ts';
+import { GEMINI_AUTH_HINT } from './gemini-ui-mapper.ts';
+
 import { probeJunieAuthentication } from './junie-auth-probe.ts';
 import { agentHomePaths } from '../paths.ts';
 
-export const PROVIDER_IDS = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'junie', 'copilot', 'omp'] as const;
+export const PROVIDER_IDS = RUNNER_IDS;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderConnectionState =
   | 'connected'
@@ -294,6 +298,19 @@ function parsePiStatus(result: ProviderCommandResult): ProviderConnectionState |
 }
 
 /**
+ * Gemini CLI has no `auth status` subcommand (#581): `--version` proves the CLI is there, and the
+ * credentials are read where the CLI itself reads them (`gemini-credentials.ts`). Evidence of a key,
+ * a gateway or a Vertex project is `connected`; its absence is `unknown`, never `disconnected` — a
+ * keychain-stored key or a Workspace login is invisible from outside — and carries the API-key hint.
+ */
+function parseGeminiStatus(result: ProviderCommandResult, context: ProviderParseContext): ProviderConnectionState | null {
+  if (result.exitCode !== 0 || !/\d+\.\d+/.test(result.stdout)) return null;
+  // Read off the service's injected `env` (the omp contract), so a test pins the answer instead of
+  // inheriting the developer's shell; the default env is still `process.env`.
+  return geminiHasCredentials(context.env) ? 'connected' : 'unknown';
+}
+
+/**
  * Copilot CLI has **no** non-interactive auth-status command — `login` is its only auth
  * subcommand and it is interactive (verified against 1.0.88;
  * `.ai/runs/2026-09-27-copilot-cli-runner/copilot-acp-notes.md`). What it does have is an ACP
@@ -438,6 +455,16 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
     installHint: 'Install GitHub Copilot CLI (`npm i -g @github/copilot`), then run `copilot login`.',
     parse: parseCopilotStatus,
     stdin: copilotAcpProbeStdin,
+  },
+  {
+    id: 'gemini',
+    executable: () => process.env.CEZ_GEMINI_BIN ?? 'gemini',
+    statusArgs: ['--version'],
+    // No login subcommand: the interactive CLI's `/auth` is where a key is entered.
+    loginArgs: [],
+    installHint: `Install Gemini CLI (npm i -g @google/gemini-cli). ${GEMINI_AUTH_HINT}`,
+    parse: parseGeminiStatus,
+    unknownHint: GEMINI_AUTH_HINT,
   },
   {
     id: 'omp',

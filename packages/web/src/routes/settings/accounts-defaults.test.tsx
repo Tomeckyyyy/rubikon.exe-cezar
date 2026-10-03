@@ -11,6 +11,7 @@ import type {
 } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { AppRoutes } from '@/routes'
+import { RUNNERS } from '@/routes/new-task-form'
 
 /**
  * Global settings → Agent accounts, "Defaults for new projects" (spec 2026-07-29-agent-profiles):
@@ -223,7 +224,7 @@ describe('Agent accounts → Defaults for new projects', () => {
     )
     renderAccounts()
 
-    await waitFor(() => expect(rows()).toHaveLength(9))
+    await waitFor(() => expect(rows()).toHaveLength(RUNNERS.length + 1))
     // The built-in fallback, rendered rather than thrown.
     expect(rowFor('claude', '')?.getAttribute('aria-checked')).toBe('true')
   })
@@ -232,9 +233,9 @@ describe('Agent accounts → Defaults for new projects', () => {
     serve()
     renderAccounts()
 
-    await waitFor(() => expect(rows()).toHaveLength(9))
+    await waitFor(() => expect(rows()).toHaveLength(RUNNERS.length + 1))
     expect(rows().map((r) => r.getAttribute('data-value'))).toEqual([
-      'claude', 'claude', 'codex', 'junie', 'opencode', 'cursor', 'pi', 'copilot', 'omp',
+      'claude', ...RUNNERS.map(({ id }) => id),
     ])
     expect(rows()[1]?.textContent).toContain('~/.claude-klaudiusz')
   })
@@ -243,7 +244,7 @@ describe('Agent accounts → Defaults for new projects', () => {
     serve()
     renderAccounts()
 
-    await waitFor(() => expect(rows()).toHaveLength(9))
+    await waitFor(() => expect(rows()).toHaveLength(RUNNERS.length + 1))
     expect(rowFor('claude', '')?.getAttribute('aria-checked')).toBe('true')
   })
 
@@ -251,7 +252,7 @@ describe('Agent accounts → Defaults for new projects', () => {
     serve()
     renderAccounts()
 
-    await waitFor(() => expect(rows()).toHaveLength(9))
+    await waitFor(() => expect(rows()).toHaveLength(RUNNERS.length + 1))
     fireEvent.click(rowFor('codex')!)
 
     await waitFor(() => expect(configPuts()).toHaveLength(1))
@@ -265,7 +266,7 @@ describe('Agent accounts → Defaults for new projects', () => {
     serve()
     renderAccounts()
 
-    await waitFor(() => expect(rows()).toHaveLength(9))
+    await waitFor(() => expect(rows()).toHaveLength(RUNNERS.length + 1))
     fireEvent.click(rowFor('claude', 'klaudiusz')!)
 
     await waitFor(() => expect(selections()).toHaveLength(1))
@@ -292,7 +293,7 @@ describe('Agent accounts → Defaults for new projects', () => {
     serve({ accounts: { ...ACCOUNTS, defaults: { claude: 'klaudiusz' } } })
     renderAccounts()
 
-    await waitFor(() => expect(rows()).toHaveLength(9))
+    await waitFor(() => expect(rows()).toHaveLength(RUNNERS.length + 1))
     fireEvent.click(rowFor('claude', '')!)
 
     await waitFor(() => expect(selections()).toHaveLength(1))
@@ -324,7 +325,7 @@ describe('Agent accounts → Defaults for new projects', () => {
     serve()
     renderAccounts()
 
-    await waitFor(() => expect(rows()).toHaveLength(9))
+    await waitFor(() => expect(rows()).toHaveLength(RUNNERS.length + 1))
     const pane = defaults()
     expect(pane?.textContent).toContain('has not chosen for itself')
     expect(pane?.textContent).toContain('keeps its own')

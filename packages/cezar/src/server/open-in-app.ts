@@ -128,19 +128,23 @@ function editorAvailable(editor: EditorDef): boolean {
 /** Coding-agent CLIs a session can be handed off to (#cli-handoff). Selecting one opens a
  *  terminal that resumes THIS run's session when the runner matches, or launches a fresh CLI in
  *  the worktree otherwise. The actual command is built server-side (needs the run's session). */
-const AGENT_CLIS: Array<{ runner: RunnerId; label: string; icon: string; bin: string; envBin: () => string | undefined }> = [
+type AgentCli = { label: string; icon: string; bin: string; envBin: () => string | undefined };
+const AGENT_CLI_DEFINITIONS: Record<RunnerId, AgentCli> = {
   // `claudeShellCommand` also finds a native-installer `~/.local/bin/claude` that is off PATH;
   // null back means "not found beyond PATH", which `onPath` already covers. Whatever it finds
   // must also reach the LAUNCH — see `withResolvedClaudeBin`.
-  { runner: 'claude', label: 'Claude CLI', icon: 'claude', bin: 'claude', envBin: () => claudeShellCommand() ?? undefined },
-  { runner: 'codex', label: 'Codex CLI', icon: 'codex', bin: 'codex', envBin: () => process.env.CEZ_CODEX_BIN },
-  { runner: 'junie', label: 'Junie CLI', icon: 'junie', bin: 'junie', envBin: () => process.env.CEZ_JUNIE_BIN },
-  { runner: 'opencode', label: 'OpenCode', icon: 'opencode', bin: 'opencode', envBin: () => process.env.CEZ_OPENCODE_BIN },
-  { runner: 'cursor', label: 'Cursor Agent', icon: 'cursor', bin: 'agent', envBin: () => process.env.CEZ_CURSOR_AGENT_BIN },
-  { runner: 'pi', label: 'pi CLI', icon: 'pi', bin: 'pi', envBin: () => process.env.CEZ_PI_BIN },
-  { runner: 'copilot', label: 'Copilot CLI', icon: 'copilot', bin: 'copilot', envBin: () => process.env.CEZ_COPILOT_BIN },
-  { runner: 'omp', label: 'OMP', icon: 'omp', bin: 'omp', envBin: () => process.env.CEZ_OMP_BIN },
-];
+  claude: { label: 'Claude CLI', icon: 'claude', bin: 'claude', envBin: () => claudeShellCommand() ?? undefined },
+  codex: { label: 'Codex CLI', icon: 'codex', bin: 'codex', envBin: () => process.env.CEZ_CODEX_BIN },
+  junie: { label: 'Junie CLI', icon: 'junie', bin: 'junie', envBin: () => process.env.CEZ_JUNIE_BIN },
+  opencode: { label: 'OpenCode', icon: 'opencode', bin: 'opencode', envBin: () => process.env.CEZ_OPENCODE_BIN },
+  cursor: { label: 'Cursor Agent', icon: 'cursor', bin: 'agent', envBin: () => process.env.CEZ_CURSOR_AGENT_BIN },
+  pi: { label: 'pi CLI', icon: 'pi', bin: 'pi', envBin: () => process.env.CEZ_PI_BIN },
+  copilot: { label: 'Copilot CLI', icon: 'copilot', bin: 'copilot', envBin: () => process.env.CEZ_COPILOT_BIN },
+  gemini: { label: 'Gemini CLI', icon: 'gemini', bin: 'gemini', envBin: () => process.env.CEZ_GEMINI_BIN },
+  omp: { label: 'OMP', icon: 'omp', bin: 'omp', envBin: () => process.env.CEZ_OMP_BIN },
+};
+const AGENT_CLIS = (Object.entries(AGENT_CLI_DEFINITIONS) as [RunnerId, AgentCli][])
+  .map(([runner, definition]) => ({ runner, ...definition }));
 
 /**
  * Rewrite a CLI-handoff command so it names the claude binary by PATH when detection found one
