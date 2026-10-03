@@ -35,7 +35,7 @@ id — that is the whole point of the seam.
 ### Identity
 
 ```ts
-const RUNNER_IDS = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'junie', 'copilot', 'gemini'] as const;  // the source of truth
+const RUNNER_IDS = runnerSchema.options;  // the contract's `runnerSchema` (packages/contract/src/health.ts) is the source of truth
 type RunnerId     = (typeof RUNNER_IDS)[number];                             // user-selectable
 type AgentBackend = RunnerId | 'claude-cli';                                 // + legacy id, still parses
 ```

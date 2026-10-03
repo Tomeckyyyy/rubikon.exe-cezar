@@ -876,6 +876,8 @@ export class RunStore extends EventEmitter {
           for (const entry of raw) {
             const parsed = runRecordSchema.safeParse(entry);
             if (parsed.success) {
+              // A readable copy wins over an unreadable one of the same id, whichever came first.
+              store.salvaged.delete(parsed.data.id);
               store.runs.set(parsed.data.id, reconcileLoadedRun(parsed.data, opts));
               continue;
             }
@@ -887,7 +889,7 @@ export class RunStore extends EventEmitter {
             const preserved = store.salvaged.size;
             console.warn(
               `[cez] runs.json: ${preserved} task record${preserved === 1 ? '' : 's'} this version cannot read ${preserved === 1 ? 'was' : 'were'} preserved unread` +
-                (dropped > 0 ? `; ${dropped} without an id/createdAt ${dropped === 1 ? 'was' : 'were'} dropped` : ''),
+                (dropped > 0 ? `; ${dropped} without a usable id/createdAt header ${dropped === 1 ? 'was' : 'were'} dropped` : ''),
             );
             store.indexReadHealth = { state: 'complete', omittedRuns: preserved + dropped, reason: 'Some task records could not be read by this server' };
           }
@@ -1742,15 +1744,15 @@ export class RunStore extends EventEmitter {
    * The records in `runs.json` this process knows nothing about — the ones a save has to carry
    * over rather than overwrite.
    *
-   * Validated one record at a time, and only for the ids we are actually adopting, which is the
-   * difference between this and `open()`'s whole-array parse. `saveNow` runs on a 300 ms debounce
+   * Validated one record at a time, and only for the ids we are actually adopting — `open()` parses
+   * per record too, but it has to look at every row once. `saveNow` runs on a 300 ms debounce
    * for as long as an agent is streaming, so this runs several times a second on the main thread of
    * the process also serving the cockpit's SSE, while retention lets the index reach
    * `MAX_RUNS_KEPT + MAX_ARCHIVED_KEPT` records — and in the ordinary single-process case every one
    * of them is ours, so a `z.array(...)` parse would spend all of its time validating records the
    * next line throws away. The id check is cheap and rejects nearly everything; zod sees what is
-   * left, which is normally nothing. Per-record also degrades better than `open()` can afford to:
-   * one unreadable row costs only itself instead of every foreign record in the file.
+   * left, which is normally nothing. One unreadable row costs only itself: a row with a readable
+   * header is carried over verbatim, a row without one is skipped, never the rest of the file.
    */
   private foreignRecordsOnDisk(indexPath: string): Array<{ id: string; createdAt: string; value: unknown }> {
     if (!existsSync(indexPath)) return [];

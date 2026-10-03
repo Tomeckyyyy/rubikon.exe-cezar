@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createQueryClient } from '@/api/query-client'
 import type { ProviderStatusResponse } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
-import { applyProviderStatusRow } from '@/lib/provider-status'
+import { RUNNER_ORDER, applyProviderStatusRow } from '@/lib/provider-status'
 import { workspaceQueryKeys } from '@/api/queries'
 import { PROVIDERS, ProviderSettings } from './provider-settings'
 
@@ -119,6 +119,13 @@ afterEach(() => {
 const PROVIDER_CARDS = PROVIDERS.length
 
 describe('ProviderSettings', () => {
+  it('lists exactly the contract\'s runners, in the cockpit order', () => {
+    // `PROVIDERS` is the one hand-written provider list left in the cockpit (each row carries its
+    // own label and login command); neither the type system nor the runner-union guard checks it,
+    // so a runner missing from it would otherwise never fail anything.
+    expect(PROVIDERS.map((provider) => provider.id)).toEqual(RUNNER_ORDER)
+  })
+
   it('always renders every provider card in descriptor order', async () => {
     serve()
     renderSettings()
