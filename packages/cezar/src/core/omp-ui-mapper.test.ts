@@ -86,10 +86,108 @@ describe('omp RPC → v2 golden fixtures', () => {
     ]);
   });
 
-  it('a locally-finished prompt (agentInvoked:false) completes no turn', () => {
+  it('a locally-finished prompt (agentInvoked:false) still closes the turn the prompt opened', () => {
     const state = ompTurnStarted(createOmpUiState()).state;
     const mapped = mapOmpRpcMessage({ type: 'prompt_result', agentInvoked: false, sessionSettled: true }, state);
-    expect(mapped.events).toEqual([]);
+    // No usage: nothing ran. But `turn.started` was emitted when the prompt went out, so the
+    // v2 stream must not leave turn_1 open — the next prompt is turn_2, not a continuation.
+    expect(mapped.events).toEqual([{ type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' }]);
+    expect(mapped.state.turnId).toBeNull();
+    expect(ompTurnStarted(mapped.state).events).toEqual([{ type: 'turn.started', turnId: 'turn_2' }]);
+  });
+
+  it('an errored tool with no result.content reports the text it streamed, not a placeholder', () => {
+    let state = ompTurnStarted(createOmpUiState()).state;
+    state = mapOmpRpcMessage({ type: 'tool_execution_start', toolCallId: 't1', toolName: 'bash', args: { command: 'rm x' } }, state).state;
+    state = mapOmpRpcMessage(
+      { type: 'tool_execution_update', toolCallId: 't1', partialResult: { content: [{ type: 'text', text: 'boom: permission denied' }] } },
+      state,
+    ).state;
+    const ended = mapOmpRpcMessage({ type: 'tool_execution_end', toolCallId: 't1', isError: true, result: { details: { exitCode: 1 } } }, state);
+    expect(ended.events[0]).toMatchObject({
+      type: 'item.completed',
+      item: { id: 't1', status: 'failed', error: 'boom: permission denied', exitCode: 1 },
+    });
+  });
+
+  it('a streamed file entry without a diff cannot erase the diff toolcall_end derived', () => {
+    let state = ompTurnStarted(createOmpUiState()).state;
+    state = mapOmpRpcMessage(
+      {
+        type: 'message_update',
+        messageId: 'm1',
+        assistantMessageEvent: {
+          type: 'toolcall_end',
+          contentIndex: 0,
+          toolCall: { type: 'toolCall', id: 't1', name: 'edit', arguments: { path: 'a.ts', old_string: 'a - b', new_string: 'a + b' } },
+        },
+      },
+      state,
+    ).state;
+    const derived = [{ path: 'a.ts', oldText: 'a - b', newText: 'a + b' }];
+    expect(state.tools.get('t1')?.diffs).toEqual(derived);
+
+    // A `path` with no `diff` is not a usable diff: no event, and the item keeps what it had.
+    const bare = mapOmpRpcMessage(
+      { type: 'tool_stream_update', toolCallId: 't1', toolName: 'edit', update: { files: [{ path: 'a.ts', op: 'update' }] } },
+      state,
+    );
+    expect(bare.events).toEqual([]);
+    expect(bare.state.tools.get('t1')?.diffs).toEqual(derived);
+
+    // A real streamed diff is MERGED onto the same path: the old/new text survives, the unified
+    // view is added; a second path is appended.
+    const streamed = mapOmpRpcMessage(
+      {
+        type: 'tool_stream_update',
+        toolCallId: 't1',
+        toolName: 'edit',
+        update: { files: [{ path: 'a.ts', diff: '-a - b\n+a + b' }, { path: 'b.ts', diff: '+new' }] },
+      },
+      bare.state,
+    );
+    expect(streamed.events).toHaveLength(1);
+    expect((streamed.events[0] as Extract<UiEvent, { type: 'item.updated' }>).item).toMatchObject({
+      diffs: [
+        { path: 'a.ts', oldText: 'a - b', newText: 'a + b', unified: '-a - b\n+a + b' },
+        { path: 'b.ts', oldText: null, unified: '+new' },
+      ],
+    });
+  });
+
+  it('maps an abandoned todo phase to cancelled — dropped, not finished', () => {
+    let state = ompTurnStarted(createOmpUiState()).state;
+    state = mapOmpRpcMessage({ type: 'tool_execution_start', toolCallId: 't1', toolName: 'todo', args: { op: 'init' } }, state).state;
+    const ended = mapOmpRpcMessage(
+      {
+        type: 'tool_execution_end',
+        toolCallId: 't1',
+        toolName: 'todo',
+        result: {
+          content: [{ type: 'text', text: 'ok' }],
+          details: {
+            phases: [{
+              tasks: [
+                { content: 'read', status: 'completed' },
+                { content: 'rewrite', status: 'abandoned' },
+                { content: 'test', status: 'in_progress' },
+                { content: 'ship', status: 'blocked' },
+              ],
+            }],
+          },
+        },
+      },
+      state,
+    );
+    expect(ended.events.find((event) => event.type === 'plan.updated')).toEqual({
+      type: 'plan.updated',
+      entries: [
+        { content: 'read', status: 'completed' },
+        { content: 'rewrite', status: 'cancelled' },
+        { content: 'test', status: 'in_progress' },
+        { content: 'ship', status: 'pending' },
+      ],
+    });
   });
 
   it('does not double-start the same tool from toolcall_end and tool_execution_start', () => {

@@ -74,6 +74,8 @@ export function providerAuthChecksDisabled(
 export interface ProviderParseContext {
   /** The account's config dir when a non-default account is being probed; absent = the default. */
   configDir?: string;
+  /** The environment credential discovery reads — the service's injected `env`, never `process.env` directly. */
+  env: NodeJS.ProcessEnv;
 }
 
 interface ProviderDescriptor {
@@ -333,15 +335,17 @@ const OMP_AUTH_HINT =
 
 function parseOmpStatus(result: ProviderCommandResult, context: ProviderParseContext): ProviderConnectionState | null {
   if (result.exitCode !== 0 || !/\d+\.\d+/.test(result.stdout)) return null;
-  return ompHasConfiguredCredential(context.configDir) ? 'connected' : 'unknown';
+  return ompHasConfiguredCredential(context.env, context.configDir) ? 'connected' : 'unknown';
 }
 
 /**
  * Evidence of an omp login, for the account being probed: a non-empty provider KEY in the
  * environment, or the `agent.db` omp writes on login into the account's own agent dir (a second
  * account is its own `$PI_CODING_AGENT_DIR`, so the default account's store says nothing about it).
+ * `env` is the service's injected environment (`ProviderAuthService`'s `env` option): the only
+ * host state this probe reads, so a test pins both answers instead of asking the developer's shell.
  */
-function ompHasConfiguredCredential(configDir?: string, env: NodeJS.ProcessEnv = process.env): boolean {
+function ompHasConfiguredCredential(env: NodeJS.ProcessEnv, configDir?: string): boolean {
   const hasNonEmptyKey = Object.keys(env).some((name) => isOmpCredentialVariable(name) && (env[name] ?? '').trim() !== '');
   if (hasNonEmptyKey) return true;
   return existsSync(join(configDir ?? agentHomePaths(env).omp, 'agent.db'));
@@ -545,6 +549,7 @@ export class ProviderAuthService {
   private readonly platform: NodeJS.Platform;
   private readonly createAuthFailureId: () => string;
   private readonly probeJunie: () => Promise<{ connected: boolean; hint?: string; notInstalled?: boolean }>;
+  private readonly env: NodeJS.ProcessEnv;
   private readonly runtimeFailures = new Map<ProviderId, RuntimeAuthFailure>();
   /** One self-check at a time per provider, and not more often than the cooldown. Both guard the
    *  same thing — a CLI spawn per auth-shaped error line — from the two directions it can arrive
@@ -578,8 +583,13 @@ export class ProviderAuthService {
      *  discovery cwd (`server.ts`'s `bootRoot`) instead of silently diverging from it. */
     cwd?: string;
     probeJunie?: () => Promise<{ connected: boolean; hint?: string; notInstalled?: boolean }>;
+    /** The environment a status parser may read (omp's credential discovery is env- and
+     *  file-shaped evidence, not a CLI answer). Injected like `runCommand` and `now` so the suite
+     *  pins both of omp's answers instead of inheriting whatever keys the developer's shell exports. */
+    env?: NodeJS.ProcessEnv;
   }) {
     this.runCommand = options?.runCommand ?? defaultRunProviderCommand;
+    this.env = options?.env ?? process.env;
     this.now = options?.now ?? Date.now;
     this.platform = options?.platform ?? process.platform;
     this.createAuthFailureId = options?.createAuthFailureId ?? randomUUID;
@@ -933,7 +943,7 @@ export class ProviderAuthService {
     if (result.errorCode) {
       return { provider: descriptor.id, status: 'unknown', hint: UNKNOWN_HINT };
     }
-    const status = descriptor.parse(result, configDir ? { configDir } : {});
+    const status = descriptor.parse(result, { env: this.env, ...(configDir ? { configDir } : {}) });
     if (status === 'unknown') return { provider: descriptor.id, status, hint: descriptor.unknownHint ?? UNKNOWN_HINT };
     if (status !== null) return { provider: descriptor.id, status };
     return { provider: descriptor.id, status: 'unknown', hint: UNKNOWN_HINT };

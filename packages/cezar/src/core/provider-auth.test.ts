@@ -1413,61 +1413,71 @@ describe('ProviderAuthService', () => {
 });
 
 describe('omp credential discovery', () => {
-  let strippedKeys: Record<string, string | undefined>;
-  const TOUCHED = ['OPENROUTER_API_KEY', 'OPENAI_BASE_URL', 'ANTHROPIC_MODEL'];
+  // omp's answer is evidence the service reads off its injected `env` — a provider KEY, or an
+  // `agent.db` under the agent dir that env names — so every case below pins the environment
+  // instead of asking (or stripping) the developer's shell. The agent dir is a fresh temp dir with
+  // no `agent.db`, so the host's own `~/.omp/agent` login never leaks in either.
+  const bare = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({ PI_CODING_AGENT_DIR: ompAgentDir, ...extra });
+  const probe = (env: NodeJS.ProcessEnv) => statuses(new ProviderAuthService({ runCommand: runner(), env }));
 
   beforeEach(() => {
-    // No file-shaped evidence and no provider key: the host's own keys must not leak in. Strip
-    // exactly the variables the production check reads, plus the ones these tests set.
     rmSync(join(ompAgentDir, 'agent.db'), { force: true });
-    strippedKeys = {};
-    for (const name of Object.keys(process.env)) {
-      if (isOmpCredentialVariable(name) || TOUCHED.includes(name)) {
-        strippedKeys[name] = process.env[name];
-        delete process.env[name];
-      }
-    }
-  });
-  afterEach(() => {
-    for (const name of TOUCHED) delete process.env[name];
-    for (const [name, value] of Object.entries(strippedKeys)) {
-      if (value !== undefined) process.env[name] = value;
-    }
   });
 
   it('is unknown — never disconnected — with the login hint when no credential is visible', async () => {
-    const rows = await statuses(new ProviderAuthService({ runCommand: runner() }));
+    const rows = await probe(bare());
     expect(rows.omp!.status).toBe('unknown');
     expect(rows.omp!.hint).toMatch(/run `omp` once and log in/);
   });
 
   it('is connected on the agent.db a native login leaves in the active agent dir', async () => {
     writeFileSync(join(ompAgentDir, 'agent.db'), '');
-    const rows = await statuses(new ProviderAuthService({ runCommand: runner() }));
-    expect(rows.omp).toEqual({ status: 'connected', hint: undefined });
+    expect((await probe(bare())).omp).toEqual({ status: 'connected', hint: undefined });
   });
 
   it('is connected on a NON-EMPTY provider key, and a key that is set but empty is no credential', async () => {
-    process.env.OPENROUTER_API_KEY = '';
-    expect((await statuses(new ProviderAuthService({ runCommand: runner() }))).omp!.status).toBe('unknown');
-    process.env.OPENROUTER_API_KEY = 'sk-or-test';
-    expect((await statuses(new ProviderAuthService({ runCommand: runner() }))).omp!.status).toBe('connected');
+    expect((await probe(bare({ OPENROUTER_API_KEY: '' }))).omp!.status).toBe('unknown');
+    expect((await probe(bare({ OPENROUTER_API_KEY: '   ' }))).omp!.status).toBe('unknown');
+    expect((await probe(bare({ OPENROUTER_API_KEY: 'sk-or-test' }))).omp!.status).toBe('connected');
+    expect((await probe(bare({ ANTHROPIC_AUTH_TOKEN: 'tok' }))).omp!.status).toBe('connected');
   });
 
-  it('a provider variable that is not a key (OPENAI_BASE_URL, ANTHROPIC_MODEL) is no credential', async () => {
-    process.env.OPENAI_BASE_URL = 'http://localhost:1234/v1';
-    process.env.ANTHROPIC_MODEL = 'claude-sonnet-5';
-    expect((await statuses(new ProviderAuthService({ runCommand: runner() }))).omp!.status).toBe('unknown');
-    expect(isOmpCredentialVariable('OPENAI_BASE_URL')).toBe(false);
+  it('a provider variable that is not a key (OPENAI_BASE_URL, ANTHROPIC_MODEL, …) is no credential', async () => {
+    const decoys = {
+      OPENAI_BASE_URL: 'http://localhost:1234/v1',
+      OPENAI_ORG_ID: 'org-1',
+      OPENAI_API_KEY_FILE: '/run/secrets/openai',
+      ANTHROPIC_MODEL: 'claude-sonnet-5',
+      ANTHROPIC_BASE_URL: 'http://localhost:4000',
+      ANTHROPIC_MAX_TOKENS: '4096',
+      AZURE_OPENAI_ENDPOINT: 'https://x.openai.azure.com',
+      GEMINI_MODEL: 'gemini-3.5-flash',
+    };
+    expect((await probe(bare(decoys))).omp!.status).toBe('unknown');
+    for (const name of Object.keys(decoys)) expect(isOmpCredentialVariable(name), name).toBe(false);
     expect(isOmpCredentialVariable('OPENAI_API_KEY')).toBe(true);
     expect(isOmpCredentialVariable('openrouter_api_key')).toBe(true);
+    expect(isOmpCredentialVariable('GEMINI_API_KEY')).toBe(true);
+    // A key of a family omp does not resolve is not omp's credential either.
     expect(isOmpCredentialVariable('GITHUB_TOKEN')).toBe(false);
+    expect(isOmpCredentialVariable('CURSOR_API_KEY')).toBe(false);
+  });
+
+  it('does not read process.env at all when an env is injected', async () => {
+    const saved = process.env.OPENROUTER_API_KEY;
+    process.env.OPENROUTER_API_KEY = 'sk-or-leaked-from-the-shell';
+    try {
+      expect((await probe(bare())).omp!.status).toBe('unknown');
+    } finally {
+      if (saved === undefined) delete process.env.OPENROUTER_API_KEY;
+      else process.env.OPENROUTER_API_KEY = saved;
+    }
   });
 
   it('reads a second account\'s own agent dir, not the default account\'s store', async () => {
     const second = mkdtempSync(join(tmpdir(), 'cez-omp-second-'));
     try {
-      const service = new ProviderAuthService({ runCommand: runner() });
+      const service = new ProviderAuthService({ runCommand: runner(), env: bare() });
       // Default account logged in, second one not: the second must not borrow the default's evidence.
       writeFileSync(join(ompAgentDir, 'agent.db'), '');
       expect((await service.profileStatus('omp', { id: 'work', configDir: second })).status).toBe('unknown');
@@ -1475,8 +1485,8 @@ describe('omp credential discovery', () => {
       rmSync(join(ompAgentDir, 'agent.db'), { force: true });
       writeFileSync(join(second, 'agent.db'), '');
       // A fresh service: profile answers are cached per account id for minutes.
-      expect((await statuses(new ProviderAuthService({ runCommand: runner() }))).omp!.status).toBe('unknown');
-      expect((await new ProviderAuthService({ runCommand: runner() }).profileStatus('omp', { id: 'work', configDir: second })).status).toBe('connected');
+      expect((await probe(bare())).omp!.status).toBe('unknown');
+      expect((await new ProviderAuthService({ runCommand: runner(), env: bare() }).profileStatus('omp', { id: 'work', configDir: second })).status).toBe('connected');
     } finally {
       rmSync(second, { recursive: true, force: true });
     }
@@ -1487,8 +1497,20 @@ describe('omp credential discovery', () => {
       runCommand: runner((executable) => executable === 'omp'
         ? { stdout: '', stderr: '', exitCode: null, errorCode: 'ENOENT' }
         : resultFor(executable)),
+      env: bare({ OPENROUTER_API_KEY: 'sk-or-test' }), // a key is no substitute for the CLI
     }));
     expect(rows.omp!.status).toBe('not-installed');
     expect(rows.omp!.hint).toMatch(/Install OMP/);
+  });
+
+  it('a `--version` that fails is unknown with the generic hint — omp has no disconnected answer', async () => {
+    const rows = await statuses(new ProviderAuthService({
+      runCommand: runner((executable) => executable === 'omp'
+        ? { stdout: '', stderr: 'boom', exitCode: 1 }
+        : resultFor(executable)),
+      env: bare({ OPENROUTER_API_KEY: 'sk-or-test' }),
+    }));
+    expect(rows.omp!.status).toBe('unknown');
+    expect(rows.omp!.hint).not.toMatch(/run `omp` once/);
   });
 });

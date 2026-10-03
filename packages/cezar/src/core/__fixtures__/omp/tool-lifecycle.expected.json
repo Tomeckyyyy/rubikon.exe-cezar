@@ -240,7 +240,8 @@
       "diffs": [
         {
           "path": "calc.py",
-          "oldText": null,
+          "oldText": "return a - b  # bug",
+          "newText": "return a + b  # bug",
           "unified": " 1|def add(a,b):\n-2|    return a - b  # bug\n+2|    return a + b  # bug\n 3|"
         }
       ]
@@ -263,7 +264,8 @@
       "diffs": [
         {
           "path": "calc.py",
-          "oldText": null,
+          "oldText": "return a - b  # bug",
+          "newText": "return a + b  # bug",
           "unified": " 1|def add(a,b):\n-2|    return a - b  # bug\n+2|    return a + b  # bug\n 3|"
         }
       ],

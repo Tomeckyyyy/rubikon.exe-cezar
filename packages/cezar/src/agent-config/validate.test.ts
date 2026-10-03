@@ -65,6 +65,20 @@ describe('validateConfig', () => {
     expect(validateConfig('key: [1, 2\n', 'yaml').ok).toBe(false);
   });
 
+  it('yaml: a well-formed document that is not a mapping is no config.yml', () => {
+    // These parse fine, but `parseYamlMapping` would read each as `{}` — saving one would wipe
+    // every setting while reporting success.
+    const sequence = validateConfig('- a\n- b\n', 'yaml');
+    expect(sequence.ok).toBe(false);
+    expect(sequence.error).toMatch(/must be a mapping.*sequence/);
+    expect(validateConfig('just a string\n', 'yaml').ok).toBe(false);
+    expect(validateConfig('42\n', 'yaml').ok).toBe(false);
+    expect(validateConfig('true\n', 'yaml').ok).toBe(false);
+    // An empty document is a new file, like empty content.
+    expect(validateConfig('---\n', 'yaml').ok).toBe(true);
+    expect(validateConfig('# only a comment\n', 'yaml').ok).toBe(true);
+  });
+
   it('plain json comments are rejected under strict json but ok under jsonc', () => {
     expect(validateConfig('{"a":1} // c', 'json').ok).toBe(false);
     expect(validateConfig('{"a":1} // c', 'jsonc').ok).toBe(true);

@@ -76,6 +76,10 @@ const DISCONNECTED_OUTPUT: Record<ProviderId, string> = {
   pi: 'No models available. Use /login to authenticate.',
   junie: 'Junie version: 26.9.22 (3419.7)',
   copilot: '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Authentication required"}}',
+  // omp has no disconnected answer: `--version` is the only probe and it says nothing about a
+  // login. Its credential evidence is read off the injected env / agent dir (pinned in
+  // `beforeEach` below), so the state map's `disconnected` for omp exercises the exit-1 path only
+  // (→ `unknown`); the unknown/connected branches live in `core/provider-auth.test.ts`.
   omp: '18.4.2',
 };
 

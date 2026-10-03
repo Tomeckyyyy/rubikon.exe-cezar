@@ -36,9 +36,10 @@ import type { ProviderId } from './provider-auth.ts';
  * - **cursor** → `CURSOR_CONFIG_DIR` exists and is honoured for the default profile's home
  *   (`paths.ts`), but a second-account carry through it is unverified against a real Cursor
  *   login the way Claude's was. `null` until that is confirmed rather than assumed.
- * - **pi** → nothing documented. pi ships no per-user home variable of its own, so — exactly like
- *   OpenCode — a second account cannot be carried without silently billing the wrong one. `null`
- *   until pi documents a single home variable that moves credentials as well as config.
+ * - **pi** → `PI_CODING_AGENT_DIR` exists (pi's own variable, default `~/.pi/agent`) and moves the
+ *   agent dir, but whether pi's stored login travels with it is unverified against a real second
+ *   login the way Claude's was — so, exactly like OpenCode, a second account cannot be carried
+ *   without risking a silent bill to the wrong one. `null` until that is confirmed.
  * - **junie** → nothing documented. Its shim's `JUNIE_DATA` relocates only the installed BINARY
  *   versions directory (`~/.local/share/junie`); the actual per-user state — `secure_credentials.json`,
  *   `config.json`, `sessions/` — lives under `~/.junie` with no override var in `junie --help`
@@ -49,8 +50,12 @@ import type { ProviderId } from './provider-auth.ts';
  *   `GITHUB_TOKEN` ahead of any stored credential regardless. `null` until a test proves one
  *   variable moves both (spec 2026-09-19-runner-seam-native-backends Q14) — being wrong here
  *   bills the wrong account.
- * - **omp** → `PI_CODING_AGENT_DIR`. Documented (settings.md): the whole agent base moves —
- *   `config.yml`, the auth store (`agent.db`), `AGENTS.md`, `mcp.json` — so credentials move too.
+ * - **omp** → `PI_CODING_AGENT_DIR`. The SAME variable as pi's — omp is pi's fork and kept the
+ *   `PI_*` names — but here it is documented (`omp --help`, settings.md) to move the whole agent
+ *   base: `config.yml`, the auth store (`agent.db`), `AGENTS.md`, `mcp.json`, so credentials move
+ *   too. One host export therefore relocates BOTH agents' bases; that is omp's own behaviour, and
+ *   cezar's omp credential probe reading the same dir is the probe agreeing with the CLI. cezar
+ *   itself sets the variable per account and per omp run only (`profileEnv`), never host-wide.
  */
 export const PROFILE_ENV_VAR: Record<ProviderId, string | null> = {
   claude: 'CLAUDE_CONFIG_DIR',

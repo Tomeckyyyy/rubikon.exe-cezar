@@ -271,18 +271,27 @@ function mapToolUpdate(value: Record<string, unknown>, state: OmpUiMapperState):
 function mapToolStream(value: Record<string, unknown>, state: OmpUiMapperState): OmpUiMapping {
   const id = string(value.toolCallId);
   const previous = id ? state.tools.get(id) : undefined;
+  if (!id || !previous) return { events: [], state };
   const update = isRecord(value.update) ? value.update : undefined;
   const files = Array.isArray(update?.files) ? update.files : [];
-  const diffs: UiToolItem['diffs'] = [];
+  // Merge, never replace: `toolcall_end` already derived an old/new-text diff from the call's
+  // arguments, so a streamed entry ADDS its unified line-diff to that path, and an entry with a
+  // bare `path` and no diff adds nothing — it must not erase what the item already shows.
+  const diffs = [...(previous.diffs ?? [])];
+  let changed = false;
   for (const file of files) {
     if (!isRecord(file)) continue;
     const path = string(file.path);
     const unified = string(file.diff);
+    if (!path || !unified) continue;
+    const index = diffs.findIndex((diff) => diff.path === path);
     // Streamed line-diffs carry no before-text; `oldText: null` is the "newly
     // created / no comparison base" spelling of the FileDiff contract.
-    if (path) diffs.push({ path, oldText: null, unified: unified ?? undefined });
+    if (index === -1) diffs.push({ path, oldText: null, unified });
+    else diffs[index] = { ...diffs[index]!, unified };
+    changed = true;
   }
-  if (!id || !previous || diffs.length === 0) return { events: [], state };
+  if (!changed) return { events: [], state };
   const item: UiToolItem = { ...previous, diffs };
   const tools = new Map(state.tools);
   tools.set(id, item);
@@ -304,13 +313,7 @@ function mapToolEnd(value: Record<string, unknown>, state: OmpUiMapperState): Om
     ...previous,
     status: isError ? 'failed' : 'completed',
     ...(exitCode !== undefined ? { exitCode } : {}),
-    ...(isError
-      ? { error: output ?? 'omp tool failed' }
-      : output !== undefined
-        ? { output }
-        : previous.output !== undefined
-          ? { output: previous.output }
-          : {}),
+    ...(isError ? { error: output ?? 'omp tool failed' } : output !== undefined ? { output } : {}),
   };
   const tools = new Map(state.tools);
   tools.set(id, item);
@@ -323,9 +326,15 @@ function mapToolEnd(value: Record<string, unknown>, state: OmpUiMapperState): Om
 /** `prompt_result` ends the turn pi used to end with `agent_settled`. */
 function mapPromptResult(value: Record<string, unknown>, state: OmpUiMapperState): OmpUiMapping {
   if (!state.turnId) return { events: [], state };
-  // `agentInvoked: false` means a slash command finished locally — no agent
-  // turn ran, so there is nothing to complete.
-  if (value.agentInvoked === false) return { events: [], state };
+  // `agentInvoked: false` means a slash command finished locally — no agent ran, but the runner
+  // did open this turn when it sent the prompt, so it is closed here: every `turn.started` gets
+  // its `turn.completed` (the v1 stream already recovers via `turn-end`), with no usage to report.
+  if (value.agentInvoked === false) {
+    return {
+      events: [{ type: 'turn.completed', turnId: state.turnId, stopReason: 'end_turn' }],
+      state: { ...state, turnId: null, turnUsage: null, turnCostUsd: null },
+    };
+  }
   const status = string(value.status);
   const reason: StopReason =
     status === 'aborted' ? 'cancelled' : status === 'error' ? 'error' : status === 'completed' ? 'end_turn' : 'end_turn';
@@ -416,8 +425,10 @@ function toolResultPlan(name: string | undefined, result: Record<string, unknown
 function planStatus(status: string | undefined): PlanEntry['status'] | undefined {
   switch (status) {
     case 'completed':
-    case 'abandoned':
       return 'completed';
+    // An abandoned phase was dropped, not finished — the plan dock has a word for that.
+    case 'abandoned':
+      return 'cancelled';
     case 'in_progress':
       return 'in_progress';
     case 'pending':
