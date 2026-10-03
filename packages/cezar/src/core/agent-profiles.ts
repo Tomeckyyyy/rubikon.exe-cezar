@@ -49,6 +49,8 @@ import type { ProviderId } from './provider-auth.ts';
  *   `GITHUB_TOKEN` ahead of any stored credential regardless. `null` until a test proves one
  *   variable moves both (spec 2026-09-19-runner-seam-native-backends Q14) — being wrong here
  *   bills the wrong account.
+ * - **omp** → `PI_CODING_AGENT_DIR`. Documented (settings.md): the whole agent base moves —
+ *   `config.yml`, the auth store (`agent.db`), `AGENTS.md`, `mcp.json` — so credentials move too.
  */
 export const PROFILE_ENV_VAR: Record<ProviderId, string | null> = {
   claude: 'CLAUDE_CONFIG_DIR',
@@ -58,6 +60,7 @@ export const PROFILE_ENV_VAR: Record<ProviderId, string | null> = {
   pi: null,
   junie: null,
   copilot: null,
+  omp: 'PI_CODING_AGENT_DIR',
 };
 
 /** Providers that can carry more than one account — what the UI offers "Add account" for. */
@@ -116,4 +119,6 @@ const PROFILE_DIR_MARKERS: Record<ProviderId, readonly string[]> = {
   junie: [],
   // Same for copilot (`PROFILE_ENV_VAR.copilot === null`).
   copilot: [],
+  // `PI_CODING_AGENT_DIR` moves the whole base; `config.yml` + `agent.db` are its signature files.
+  omp: ['config.yml', 'agent.db'],
 };

@@ -2030,6 +2030,7 @@ export function createApp(deps: ServerDeps) {
       ...(profile.provider === 'codex' ? { codex: profile.path } : {}),
       ...(profile.provider === 'opencode' ? { opencodeConfig: profile.path } : {}),
       ...(profile.provider === 'cursor' ? { cursor: profile.path } : {}),
+      ...(profile.provider === 'omp' ? { omp: profile.path } : {}),
     };
     const defs = listConfigFiles().filter(
       (def) => def.scope === 'user' && def.runners.includes(profile.provider),
@@ -3255,6 +3256,7 @@ export function createApp(deps: ServerDeps) {
             pi: z.string().trim().min(1).max(200).nullable().optional(),
             junie: z.string().trim().min(1).max(200).nullable().optional(),
             copilot: z.string().trim().min(1).max(200).nullable().optional(),
+            omp: z.string().trim().min(1).max(200).nullable().optional(),
           })
           .optional(),
       })
@@ -6059,6 +6061,7 @@ export function createApp(deps: ServerDeps) {
         opencode: modelPresetSchema,
         cursor: modelPresetSchema,
         pi: modelPresetSchema,
+        omp: modelPresetSchema,
       })
       .optional(),
     // Concurrency + memory guard (Settings → Resources). maxParallel clamps to
@@ -6737,6 +6740,10 @@ export function resumeCommand(runner: string | undefined, sessionId: string): st
     case 'copilot':
       // `--resume <id>` takes a session id, a task id or an id prefix (`copilot --help`, 1.0.88).
       return `copilot --resume ${sessionId}`;
+    case 'omp':
+      // The RPC session id is omp's own session id, which `--resume` accepts
+      // (`omp --mode rpc --resume <id>` spawns the same process resumed).
+      return `omp --resume ${sessionId}`;
     default:
       return `claude --resume ${sessionId}`;
   }

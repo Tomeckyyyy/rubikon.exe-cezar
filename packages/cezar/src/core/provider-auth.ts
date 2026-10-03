@@ -1,13 +1,16 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { AGENT_MODELS_LOCKED_ENV } from './agent-model-policy.ts';
 import { profileEnv } from './agent-profiles.ts';
 import { resolveClaudeBin } from './claude-bin.ts';
 import { quoteExecutable, withEnvPrefix } from './shell-env.ts';
 import { probeJunieAuthentication } from './junie-auth-probe.ts';
+import { agentHomePaths } from '../paths.ts';
 
-export const PROVIDER_IDS = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'junie', 'copilot'] as const;
+export const PROVIDER_IDS = ['claude', 'codex', 'opencode', 'cursor', 'pi', 'junie', 'copilot', 'omp'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 export type ProviderConnectionState =
   | 'connected'
@@ -67,13 +70,19 @@ export function providerAuthChecksDisabled(
   return env[AGENT_MODELS_LOCKED_ENV] === '1';
 }
 
+/** What a status parser may consult beyond the command's own answer. */
+export interface ProviderParseContext {
+  /** The account's config dir when a non-default account is being probed; absent = the default. */
+  configDir?: string;
+}
+
 interface ProviderDescriptor {
   id: ProviderId;
   executable: () => string;
   statusArgs: readonly string[];
   loginArgs: readonly string[];
   installHint: string;
-  parse: (result: ProviderCommandResult) => ProviderConnectionState | null;
+  parse: (result: ProviderCommandResult, context: ProviderParseContext) => ProviderConnectionState | null;
   /** See {@link RunProviderCommand}'s `stdin`. */
   stdin?: () => string;
   /**
@@ -88,6 +97,8 @@ interface ProviderDescriptor {
    * spawn entirely removes that race instead of racing to out-guess it.
    */
   precheck?: () => ProviderConnectionState | undefined;
+  /** What to tell the user when `parse` answers `unknown` on purpose (default: the generic hint). */
+  unknownHint?: string;
 }
 
 const COMMAND_TIMEOUT_MS = 10_000;
@@ -309,6 +320,60 @@ function parseCopilotStatus(result: ProviderCommandResult): ProviderConnectionSt
   return null;
 }
 
+/**
+ * omp has no auth-status subcommand: `--version` proves the CLI is there. Credentials live in
+ * omp's own `agent.db` / OS keychain plus the provider-key environment (the same MULTI_PROVIDER_*
+ * set `buildChildEnv` forwards). Evidence — a NON-EMPTY provider key in the environment, or an
+ * agent.db in the active agent dir (`$PI_CODING_AGENT_DIR` or `~/.omp/agent`) — counts as
+ * `connected`; its absence is `unknown`, never `disconnected` (a keychain-only login is invisible
+ * from outside), and carries the auth hint.
+ */
+const OMP_AUTH_HINT =
+  'omp keeps its login in its own auth store — run `omp` once and log in; provider API keys in the environment (e.g. OPENROUTER_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY) also work';
+
+function parseOmpStatus(result: ProviderCommandResult, context: ProviderParseContext): ProviderConnectionState | null {
+  if (result.exitCode !== 0 || !/\d+\.\d+/.test(result.stdout)) return null;
+  return ompHasConfiguredCredential(context.configDir) ? 'connected' : 'unknown';
+}
+
+/**
+ * Evidence of an omp login, for the account being probed: a non-empty provider KEY in the
+ * environment, or the `agent.db` omp writes on login into the account's own agent dir (a second
+ * account is its own `$PI_CODING_AGENT_DIR`, so the default account's store says nothing about it).
+ */
+function ompHasConfiguredCredential(configDir?: string, env: NodeJS.ProcessEnv = process.env): boolean {
+  const hasNonEmptyKey = Object.keys(env).some((name) => isOmpCredentialVariable(name) && (env[name] ?? '').trim() !== '');
+  if (hasNonEmptyKey) return true;
+  return existsSync(join(configDir ?? agentHomePaths(env).omp, 'agent.db'));
+}
+
+/**
+ * Only a KEY-shaped variable of a provider family omp resolves is a credential: `OPENAI_BASE_URL`
+ * or `ANTHROPIC_MODEL` name a provider without authenticating anything. Mirrors
+ * MULTI_PROVIDER_PREFIXES in agent-env.ts for the families; exported so the tests strip exactly
+ * the variables the check reads.
+ */
+export function isOmpCredentialVariable(name: string): boolean {
+  const upper = name.toUpperCase();
+  return OMP_CREDENTIAL_PREFIXES.some((prefix) => upper.startsWith(prefix)) && /(_API_KEY|_KEY|_TOKEN)$/.test(upper);
+}
+
+/** The provider-key families omp resolves from the environment (mirrors MULTI_PROVIDER_PREFIXES in agent-env.ts). */
+export const OMP_CREDENTIAL_PREFIXES: readonly string[] = [
+  'OPENAI_',
+  'ANTHROPIC_',
+  'AZURE_OPENAI_',
+  'OPENROUTER_',
+  'GROQ_',
+  'MISTRAL_',
+  'GEMINI_',
+  'GOOGLE_GENERATIVE_AI_',
+  'DEEPSEEK_',
+  'XAI_',
+  'PERPLEXITY_',
+  'TOGETHER_',
+  'FIREWORKS_',
+];
 const DESCRIPTORS: readonly ProviderDescriptor[] = [
   {
     id: 'claude',
@@ -369,6 +434,16 @@ const DESCRIPTORS: readonly ProviderDescriptor[] = [
     installHint: 'Install GitHub Copilot CLI (`npm i -g @github/copilot`), then run `copilot login`.',
     parse: parseCopilotStatus,
     stdin: copilotAcpProbeStdin,
+  },
+  {
+    id: 'omp',
+    executable: () => process.env.CEZ_OMP_BIN ?? 'omp',
+    statusArgs: ['--version'],
+    // No login subcommand: the interactive CLI's own auth flow (agent.db / keychain) is the entry.
+    loginArgs: [],
+    installHint: `Install OMP (brew install can1357/tap/omp). ${OMP_AUTH_HINT}`,
+    parse: parseOmpStatus,
+    unknownHint: OMP_AUTH_HINT,
   },
 ];
 
@@ -858,7 +933,8 @@ export class ProviderAuthService {
     if (result.errorCode) {
       return { provider: descriptor.id, status: 'unknown', hint: UNKNOWN_HINT };
     }
-    const status = descriptor.parse(result);
+    const status = descriptor.parse(result, configDir ? { configDir } : {});
+    if (status === 'unknown') return { provider: descriptor.id, status, hint: descriptor.unknownHint ?? UNKNOWN_HINT };
     if (status !== null) return { provider: descriptor.id, status };
     return { provider: descriptor.id, status: 'unknown', hint: UNKNOWN_HINT };
   }
