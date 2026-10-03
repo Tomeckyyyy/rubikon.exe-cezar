@@ -424,6 +424,7 @@ export const setConfigInputSchema = z.object({
       opencode: z.string().trim().max(200).nullable().optional(),
       cursor: z.string().trim().max(200).nullable().optional(),
       pi: z.string().trim().max(200).nullable().optional(),
+      junie: z.string().trim().max(200).nullable().optional(),
       copilot: z.string().trim().max(200).nullable().optional(),
       omp: z.string().trim().max(200).nullable().optional(),
     })
