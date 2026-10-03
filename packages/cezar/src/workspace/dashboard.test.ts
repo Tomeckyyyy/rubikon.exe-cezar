@@ -128,8 +128,8 @@ describe('dashboard complete summary snapshots', () => {
     const store = RunStore.open(join(p, '.ai/cezar'));
     const reader = new DashboardReader({ projects: async () => [{ id: 'p', root: p, store }] });
     const s = await reader.snapshot();
-    expect(s.counts.reviews).toBe(0); // The owning manager does not have this row.
-    expect(s.coverage.projects[0]).toMatchObject({ state: 'unavailable', omittedRuns: 2 });
+    expect(s.counts.reviews).toBe(1); // Valid rows remain visible while the unreadable row is preserved as coverage evidence.
+    expect(s.coverage.projects[0]).toMatchObject({ state: 'unavailable', omittedRuns: 1 });
     reader.dispose();
     store.flush();
   });

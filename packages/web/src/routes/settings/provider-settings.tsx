@@ -8,7 +8,7 @@ import {
   useRetryProviderAuth,
   workspaceQueryKeys,
 } from '@/api/queries'
-import type { ProviderId, ProviderStatusResponse } from '@open-mercato/cezar-api-client'
+import { RUNNER_IDS, type ProviderId, type ProviderStatusResponse } from '@open-mercato/cezar-api-client'
 import { StatusDot, type StatusDotTone } from '@/components/status-dot'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -21,24 +21,35 @@ import { providerStatusFor } from '@/lib/provider-status'
  * and the server's hint (API key / Vertex / Workspace — Google sign-in no longer works) is the
  * actionable part (#581), so the card shows it instead.
  */
-const PROVIDERS: ReadonlyArray<{ id: ProviderId; label: string; login: string; explainsUnknown?: boolean }> = [
-  { id: 'claude', label: 'Claude Code', login: 'claude auth login' },
-  { id: 'codex', label: 'Codex', login: 'codex login' },
-  { id: 'opencode', label: 'OpenCode', login: 'opencode auth login' },
-  { id: 'cursor', label: 'Cursor', login: 'agent login' },
-  { id: 'pi', label: 'pi', login: 'pi /login' },
-  // No login subcommand: `/auth` inside the interactive CLI, or GEMINI_API_KEY in the environment.
-  { id: 'gemini', label: 'Gemini CLI', login: 'gemini', explainsUnknown: true },
-] as const
+/** The provider cards this pane renders, in order. Exported so tests count them from the
+ *  source of truth rather than from a literal that a new runner silently invalidates. */
+interface ProviderDescriptor {
+  id: ProviderId
+  label: string
+  login: string
+  /** Whether an unknown status carries a provider-specific diagnostic worth showing. */
+  showsUnknownHint?: boolean
+}
 
-const providerWriteState = <T,>(value: T): Record<ProviderId, T> => ({
-  claude: value,
-  codex: value,
-  opencode: value,
-  cursor: value,
-  pi: value,
-  gemini: value,
-})
+const PROVIDER_DESCRIPTORS: Record<ProviderId, Omit<ProviderDescriptor, 'id'> & { order: number }> = {
+  claude: { label: 'Claude Code', login: 'claude auth login', order: 0 },
+  codex: { label: 'Codex', login: 'codex login', order: 1 },
+  junie: { label: 'Junie', login: 'junie login', showsUnknownHint: true, order: 2 },
+  opencode: { label: 'OpenCode', login: 'opencode auth login', order: 3 },
+  cursor: { label: 'Cursor', login: 'agent login', order: 4 },
+  pi: { label: 'pi', login: 'pi /login', order: 5 },
+  copilot: { label: 'GitHub Copilot CLI', login: 'copilot login', order: 6 },
+  // No login subcommand: `/auth` inside the interactive CLI, or GEMINI_API_KEY in the environment.
+  gemini: { label: 'Gemini CLI', login: 'gemini', showsUnknownHint: true, order: 7 },
+}
+
+export const PROVIDERS: readonly ProviderDescriptor[] = RUNNER_IDS
+  .map((id) => ({ id, ...PROVIDER_DESCRIPTORS[id] }))
+  .sort((left, right) => left.order - right.order)
+  .map(({ order: _order, ...provider }) => provider)
+
+const providerWriteState = <T,>(value: T): Record<ProviderId, T> =>
+  Object.fromEntries(RUNNER_IDS.map((provider) => [provider, value])) as Record<ProviderId, T>
 
 const STATUS_PRESENTATION = {
   connected: { label: 'Credentials found', tone: 'success' },
@@ -247,7 +258,7 @@ export function ProviderSettings() {
                       <p className="mt-1.5 text-xs text-soft-foreground">
                         Install {provider.label}, then run <code>{provider.login}</code>.
                       </p>
-                    ) : state === 'unknown' && provider.explainsUnknown && current?.hint ? (
+                    ) : state === 'unknown' && provider.showsUnknownHint && current?.hint ? (
                       <p data-slot="provider-auth-hint" className="mt-1.5 text-xs text-soft-foreground">
                         {current.hint}
                       </p>

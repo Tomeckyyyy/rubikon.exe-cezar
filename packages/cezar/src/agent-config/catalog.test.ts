@@ -5,7 +5,9 @@ const HOME: AgentHomePaths = {
   claude: '/home/u/.claude',
   codex: '/home/u/.codex',
   opencodeConfig: '/home/u/.config/opencode',
-cursor: '/home/u/.cursor',
+  cursor: '/home/u/.cursor',
+  copilot: '/home/u/.copilot',
+  junie: '/home/u/.junie',
   gemini: '/home/u/.gemini',
 };
 
@@ -23,10 +25,10 @@ describe('agent-config catalog', () => {
     }
   });
 
-  it('<repo>/AGENTS.md is ONE entry read by two runners', () => {
+  it('<repo>/AGENTS.md is ONE entry read by every runner that reads it', () => {
     const agents = CONFIG_FILES.filter((f) => f.label === 'AGENTS.md' && f.scope === 'project');
     expect(agents).toHaveLength(1);
-    expect(agents[0]!.runners).toEqual(['codex', 'opencode']);
+    expect(agents[0]!.runners).toEqual(['codex', 'opencode', 'copilot']);
   });
 
   it('resolves repo-relative paths under the repo root', () => {
@@ -68,7 +70,9 @@ describe('agent-config catalog', () => {
       'claude.project.mcp',
       'codex.project.config',
       'codex.user.config',
-'cursor.project.mcp',
+      // Copilot keeps MCP in its own file rather than inside its settings, like Claude.
+      'copilot.user.mcp',
+      'cursor.project.mcp',
       'cursor.user.mcp',
       'gemini.project.settings',
       'gemini.user.settings',

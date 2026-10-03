@@ -120,15 +120,8 @@ export type AgentAccount = z.infer<typeof agentAccountSchema>;
 
 /** One project's choice, per provider. Explicit keys so `PROVIDER_IDS` stays the one source of
  *  truth and the value is bounded. An absent key means the discovered default. */
-const selectionSchema = z
-  .object({
-    claude: z.string().max(64).optional().catch(undefined),
-    codex: z.string().max(64).optional().catch(undefined),
-    opencode: z.string().max(64).optional().catch(undefined),
-    cursor: z.string().max(64).optional().catch(undefined),
-    pi: z.string().max(64).optional().catch(undefined),
-    gemini: z.string().max(64).optional().catch(undefined),
-  })  .passthrough();
+const selectionSchema = perRunner(z.string().max(64).optional().catch(undefined))
+  .passthrough();
 
 export type AgentAccountSelection = z.infer<typeof selectionSchema>;
 

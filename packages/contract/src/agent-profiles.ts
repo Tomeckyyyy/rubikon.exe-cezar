@@ -96,14 +96,7 @@ export function agentAccountRouteId(profile: Pick<AgentProfile, 'id' | 'provider
 }
 
 /** One project's account choice, per provider. An absent key = the discovered account. */
-export const agentAccountSelectionSchema = z.object({
-  claude: z.string().optional(),
-  codex: z.string().optional(),
-  opencode: z.string().optional(),
-  cursor: z.string().optional(),
-  pi: z.string().optional(),
-  gemini: z.string().optional(),
-});
+export const agentAccountSelectionSchema = perRunner(z.string().optional());
 export type AgentAccountSelection = z.infer<typeof agentAccountSelectionSchema>;
 
 /**

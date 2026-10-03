@@ -74,9 +74,11 @@ const OPEN_IN_ICONS: Record<string, LucideIcon> = {
   warp: RocketIcon,
   claude: BotIcon,
   codex: SparklesIcon,
+  junie: BotIcon,
   opencode: BotIcon,
   pi: BotIcon,
   gemini: BotIcon,
+  copilot: BotIcon,
 }
 
 /** The icon component for a target — `target.icon` when it's one the UI knows, else the

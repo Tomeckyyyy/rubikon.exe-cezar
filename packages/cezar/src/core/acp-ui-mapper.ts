@@ -41,6 +41,19 @@ export interface AcpDialect {
   toolNameOf(update: Record<string, unknown>): string;
   /** A kind the ACP `kind` field cannot express (a subagent delegation → `task`). */
   toolKindOf?(name: string, update: Record<string, unknown>): ToolKind | undefined;
+  /**
+   * A status the ACP `status` field understates. ACP's `pending` means "not started yet", but
+   * Copilot emits it from its own `tool.execution_start` and never sends `in_progress`
+   * (`.ai/runs/2026-09-27-copilot-cli-runner/copilot-acp-notes.md`), so for that dialect a
+   * `pending` announcement really is a running tool. Returning `undefined` keeps the ACP reading.
+   */
+  toolStatusOf?(update: Record<string, unknown>, previous: ToolStatus | undefined): ToolStatus | undefined;
+  /**
+   * The item this tool call belongs to, for an agent whose wire attributes delegated work to its
+   * parent (Copilot tags a subagent's calls with the delegating `task` call's id). Ignored when it
+   * names the call itself.
+   */
+  parentItemOf?(update: Record<string, unknown>): string | undefined;
   /** Per-turn token counts from the `session/prompt` result, when the agent reports them off-schema. */
   usageFromPromptResult?(result: Record<string, unknown>): TokenUsage | undefined;
   /** Plan entries carried by a tool call (for agents whose plan is a tool, not a `plan` update). */
@@ -278,7 +291,11 @@ function upsertTool(
   let next = closed.state;
 
   const previous = next.tools.get(toolCallId);
-  const status = toolStatus(update.status) ?? previous?.status ?? (isCall ? 'running' : undefined);
+  const status =
+    dialect.toolStatusOf?.(update, previous?.status) ??
+    toolStatus(update.status) ??
+    previous?.status ??
+    (isCall ? 'running' : undefined);
   if (!status) return { events, state: next };
   const name = previous?.name ?? dialect.toolNameOf(update);
   const rawInput = update.rawInput;
@@ -296,6 +313,8 @@ function upsertTool(
     status,
   };
   if (rawInput !== undefined) item.input = rawInput;
+  const parentItemId = previous?.parentItemId ?? dialect.parentItemOf?.(update);
+  if (parentItemId !== undefined && parentItemId !== toolCallId) item.parentItemId = parentItemId;
   const locations = toolLocations(update.locations);
   if (locations) item.locations = locations;
   if (content.diffs.length > 0) item.diffs = content.diffs;

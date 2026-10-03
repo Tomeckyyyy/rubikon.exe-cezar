@@ -5,10 +5,12 @@ import { providerStatusFor } from '@/lib/provider-status'
 const PROVIDER_LABEL: Record<Runner, string> = {
   claude: 'Claude Code',
   codex: 'Codex',
+  junie: 'Junie',
   opencode: 'OpenCode',
   cursor: 'Cursor',
   pi: 'pi',
   gemini: 'Gemini CLI',
+  copilot: 'GitHub Copilot CLI',
 }
 
 /** Mirrors the server's providerForActiveRun for POST /runs/:id/messages. */

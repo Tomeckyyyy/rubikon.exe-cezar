@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -1944,6 +1944,107 @@ describe('RunStore — the legacy `claude-cli` runner id (#547)', () => {
       'utf8',
     );
     expect(RunStore.open(dataDir).getRun('legacy-1')).toBeUndefined();
+  });
+});
+
+describe('RunStore — per-record downgrade salvage', () => {
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'cez-store-'));
+  });
+
+  afterEach(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const futureRun = (id: string, createdAt = '2026-09-20T00:00:00.000Z', archived = false) => ({
+    ...LEGACY_RUN,
+    id,
+    createdAt,
+    archived,
+    runner: 'runner-from-a-newer-cezar',
+    futurePayload: { preserve: ['this', 'verbatim'] },
+  });
+
+  const recordsOnDisk = (): Array<Record<string, unknown>> =>
+    JSON.parse(readFileSync(join(dataDir, 'runs.json'), 'utf8')) as Array<Record<string, unknown>>;
+
+  it('loads valid rows while preserving an unknown-runner row across a save', () => {
+    const unknown = futureRun('future-1');
+    writeFileSync(
+      join(dataDir, 'runs.json'),
+      JSON.stringify([LEGACY_RUN, unknown, { id: 'unaddressable', title: 42 }]),
+      'utf8',
+    );
+
+    const store = RunStore.open(dataDir);
+    expect(store.getRun(LEGACY_RUN.id)?.title).toBe(LEGACY_RUN.title);
+    expect(store.getRun('future-1')).toBeUndefined();
+    expect(store.getIndexReadHealth()).toMatchObject({ state: 'unavailable', omittedRuns: 2 });
+
+    store.flush();
+    expect(recordsOnDisk().find((record) => record.id === 'future-1')).toEqual(unknown);
+    expect(recordsOnDisk().some((record) => record.id === 'unaddressable')).toBe(false);
+  });
+
+  it('deletes a salvaged row and its companion files without resurrecting it', () => {
+    const unknown = futureRun('future-delete');
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify([unknown]), 'utf8');
+    const store = RunStore.open(dataDir);
+    const runsDir = join(dataDir, 'runs');
+    writeFileSync(join(runsDir, 'future-delete.ndjson'), '{}\n', 'utf8');
+    writeFileSync(join(runsDir, 'future-delete.handoff.md'), 'handoff', 'utf8');
+    mkdirSync(join(runsDir, 'future-delete-images'));
+    writeFileSync(join(runsDir, 'future-delete-images', 'shot.png'), 'image', 'utf8');
+
+    expect(store.deleteRun('future-delete')).toBe(true);
+    store.flush();
+    expect(recordsOnDisk()).toEqual([]);
+    expect(existsSync(join(runsDir, 'future-delete.ndjson'))).toBe(false);
+    expect(existsSync(join(runsDir, 'future-delete.handoff.md'))).toBe(false);
+    expect(existsSync(join(runsDir, 'future-delete-images'))).toBe(false);
+
+    store.flush();
+    expect(recordsOnDisk()).toEqual([]);
+  });
+
+  it('counts salvaged rows in retention and prunes the oldest with live rows', () => {
+    const unknown = Array.from({ length: 301 }, (_, index) =>
+      futureRun(`future-${index}`, new Date(Date.UTC(2026, 0, 1, 0, 0, index)).toISOString()),
+    );
+    writeFileSync(join(dataDir, 'runs.json'), JSON.stringify(unknown), 'utf8');
+
+    const store = RunStore.open(dataDir);
+    const live = store.createRun({ title: 'newest', workflow: 'quick-task', task: 'newest', steps: [] });
+    store.flush();
+
+    const ids = recordsOnDisk().map((record) => record.id);
+    expect(ids).toHaveLength(300);
+    expect(ids).toContain(live.id);
+    expect(ids).not.toContain('future-0');
+    expect(ids).not.toContain('future-1');
+    expect(ids).toContain('future-300');
+  });
+
+  it('adopts a late salvageable row from another process and retains it on later saves', () => {
+    const store = RunStore.open(dataDir);
+    const mine = store.createRun({ title: 'mine', workflow: 'quick-task', task: 'mine', steps: [] });
+    store.flush();
+    const unknown = futureRun('future-late');
+    writeFileSync(
+      join(dataDir, 'runs.json'),
+      JSON.stringify([recordsOnDisk().find((record) => record.id === mine.id), unknown, { ...LEGACY_RUN, id: 'foreign-valid' }]),
+      'utf8',
+    );
+
+    store.flush();
+    expect(recordsOnDisk().find((record) => record.id === 'future-late')).toEqual(unknown);
+    expect(recordsOnDisk().some((record) => record.id === 'foreign-valid')).toBe(true);
+
+    store.updateRun(mine.id, { status: 'running' });
+    store.flush();
+    expect(recordsOnDisk().find((record) => record.id === 'future-late')).toEqual(unknown);
   });
 });
 
