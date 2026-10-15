@@ -349,6 +349,17 @@ describe('usableRunners', () => {
     expect(usableRunners(status)).toEqual(['junie'])
   })
 
+  it('includes omp when its probe answers unknown — its login may live only in the keychain', () => {
+    const status: ProviderStatusResponse = {
+      providers: [
+        { provider: 'claude', status: 'unknown', enabled: true },
+        { provider: 'omp', status: 'unknown', enabled: true },
+      ],
+    }
+
+    expect(usableRunners(status)).toEqual(['omp'])
+  })
+
   it('still excludes disabled or not-installed Junie', () => {
     const status: ProviderStatusResponse = {
       providers: [

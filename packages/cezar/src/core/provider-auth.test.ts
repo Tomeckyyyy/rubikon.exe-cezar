@@ -1466,6 +1466,14 @@ describe('omp credential discovery', () => {
     expect(rows.omp!.hint).toMatch(/run `omp` once and log in/);
   });
 
+  it('a deliberate unknown is never reported as an inconclusive probe, and keeps its own hint', async () => {
+    const onInconclusive = vi.fn();
+    const rows = await statuses(new ProviderAuthService({ runCommand: runner(), env: bare(), onInconclusive }));
+    expect(rows.omp!.status).toBe('unknown');
+    expect(rows.omp!.hint).toMatch(/run `omp` once and log in/);
+    expect(onInconclusive.mock.calls.map(([probe]) => probe.provider)).not.toContain('omp');
+  });
+
   it('is connected on the agent.db a native login leaves in the active agent dir', async () => {
     writeFileSync(join(ompAgentDir, 'agent.db'), '');
     expect((await probe(bare())).omp).toEqual({ status: 'connected', hint: undefined });

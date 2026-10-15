@@ -224,6 +224,13 @@ describe('the config API', () => {
     expect((await getBody()).defaultModels).toEqual({});
   });
 
+  it('PUT defaultModelsAuto accepts omp — it reads a native default (`modelRoles.default`) too', async () => {
+    await put({ defaultModelsAuto: { omp: true } });
+    expect(rawFile().defaultModelsAuto).toEqual({ omp: true });
+    await put({ defaultModelsAuto: { omp: null } });
+    expect(rawFile().defaultModelsAuto).toBeUndefined();
+  });
+
   it('the fixed-model policy refuses an auto override too (#906)', async () => {
     process.env.CEZ_AGENT_MODELS_LOCKED = '1';
     mkdirSync(join(homeRoot, '.claude'), { recursive: true });

@@ -792,7 +792,7 @@ describe('workspace provider API', () => {
     });
 
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: 'provider must be claude, codex, opencode, cursor, pi, or copilot' });
+    expect(await response.json()).toEqual({ error: `provider must be ${PROVIDER_IDS.slice(0, -1).join(', ')}, or ${PROVIDER_IDS[PROVIDER_IDS.length - 1]}` });
   });
 
   it('never places request-controlled text in the opened command', async () => {

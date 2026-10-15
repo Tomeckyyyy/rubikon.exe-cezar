@@ -2093,7 +2093,7 @@ export function createApp(deps: ServerDeps) {
       },
     )
 
-    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: 'provider must be claude, codex, opencode, cursor, pi, or copilot' }), async (c) => {
+    .post('/providers/connect', jsonZodValidator(providerConnectSchema, { message: `provider must be ${PROVIDER_IDS.slice(0, -1).join(', ')}, or ${PROVIDER_IDS[PROVIDER_IDS.length - 1]}` }), async (c) => {
       const body = { data: c.req.valid('json') };
       const sid = deviceSid(c.req.header('x-cezar-sid'));
 
@@ -6687,6 +6687,8 @@ export function createApp(deps: ServerDeps) {
         codex: autoModelSchema,
         opencode: autoModelSchema,
         pi: autoModelSchema,
+        // omp reads a native default too (`modelRoles.default`), so "auto" must be expressible for it.
+        omp: autoModelSchema,
       })
       .optional(),
     // Concurrency + memory guard (Settings → Resources). maxParallel clamps to

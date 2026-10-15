@@ -17,7 +17,6 @@ import { RUNNER_IDS } from '../core/agent-runner.ts';
  * restates the definition keys of `automationDefinitionSchema` (`./types.ts`) one for one.
  */
 
-
 export const CREATE_AUTOMATION_SKILL_NAME = 'create-cezar-automation';
 
 /**

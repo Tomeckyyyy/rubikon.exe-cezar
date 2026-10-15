@@ -160,6 +160,9 @@ function sameProviderStatusRow(left: ProviderStatus, right: ProviderStatus): boo
     && left.authFailureId === right.authFailureId
 }
 
+/** Providers whose probe answers `unknown` on purpose, not by failure (mirrors the server's gate). */
+const DELIBERATELY_UNKNOWN: ReadonlySet<Runner> = new Set<Runner>(['junie', 'omp'])
+
 export function usableRunners(status: ProviderStatusResponse | undefined): Runner[] {
   const rows = completeProviderRows(status)
   if (rows === null) return []
@@ -167,10 +170,11 @@ export function usableRunners(status: ProviderStatusResponse | undefined): Runne
     rows
       .filter((row) => row.enabled && (
         row.status === 'connected'
-        // Junie has no read-only auth-status command. Its probe can confirm the CLI is installed,
-        // but must report auth as unknown rather than guess; allow selection and let ACP surface
-        // any required authentication at run time.
-        || (row.provider === 'junie' && row.status === 'unknown')
+        // Junie has no read-only auth-status command, and omp's login may live only in the OS
+        // keychain. Both probes can confirm the CLI is installed but must report auth as unknown
+        // rather than guess; allow selection and let the CLI surface any required authentication
+        // at run time.
+        || (DELIBERATELY_UNKNOWN.has(row.provider) && row.status === 'unknown')
       ))
       .map((row) => row.provider),
   )
