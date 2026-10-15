@@ -1,6 +1,7 @@
 import {
   FolderIcon,
   FolderOpenIcon,
+  FolderPlusIcon,
   LayersIcon,
   LayoutDashboardIcon,
   MenuIcon,
@@ -16,6 +17,9 @@ import { Link as RouterLink, NavLink, matchPath, useLocation } from 'react-route
 import { TRACKER_PROVIDERS } from '@/lib/tracker-providers'
 import { AddProjectDialog } from '@/components/add-project-dialog'
 import { CloneProjectDialog } from '@/components/clone-project-dialog'
+import { CreateProjectDialog } from '@/components/create-project-dialog'
+import { DialogErrorBoundary } from '@/components/dialog-error-boundary'
+import { trackAddProjectOpened } from '@/lib/telemetry'
 import { openCommandPalette } from '@/components/command-palette'
 import { GithubIcon } from '@/components/icons'
 import { commandShortcutHint } from '@/lib/use-command-shortcut'
@@ -106,12 +110,17 @@ export type AppShellProps = {
    *  the slot is generic and currently unused (the #391 skills promo it once held is gone,
    *  replaced by the opt-in Import panel on the Skills page). */
   banner?: ReactNode
+  /** The bottom edge of the main column, above the composer row: the telemetry consent bar
+   *  (docs/telemetry.md) lives here, so it never covers the view or interrupts a flow. */
+  footerBanner?: ReactNode
   /** Step 3.3's multi-project sidebar: one collapsible group per registered project, each
    *  carrying its own nav + task list. When present it REPLACES the flat nav and the
    *  `taskQuickList` slot (each group brings its own copies of both); absent — the registry
    *  still loading, or unreachable — the shell renders the single-project sidebar it always
    *  did, which is the honest degradation, not a special case. */
   projectGroups?: ReactNode
+  brandName?: string
+  brandLogoUrl?: string | null
 }
 
 /**
@@ -189,7 +198,10 @@ export const AppShell = React.memo(function AppShell({
   tracker,
   singleProject = false,
   banner,
+  footerBanner,
   projectGroups,
+  brandName = 'cezar',
+  brandLogoUrl = null,
 }: AppShellProps) {
   const { pathname } = useLocation()
   // The nav's area rules reason about the flat route map — strip any `/p/:projectId` prefix
@@ -269,6 +281,8 @@ export const AppShell = React.memo(function AppShell({
     toolsMenu,
     projectGroups,
     singleProject,
+    brandName,
+    brandLogoUrl,
   }
 
   const desktop = useDesktopShell()
@@ -293,7 +307,7 @@ export const AppShell = React.memo(function AppShell({
           className="fixed inset-x-0 top-0 z-[60] flex h-[28px] select-none items-center pl-[80px]"
         >
           {version && latestVersion && latestVersion !== version ? (
-            <TitlebarUpdateButton latestVersion={latestVersion} />
+            <TitlebarUpdateButton latestVersion={latestVersion} brandName={brandName} />
           ) : null}
         </div>
       ) : null}
@@ -307,7 +321,7 @@ export const AppShell = React.memo(function AppShell({
         {/* The Sheet root renders no DOM of its own. Keep only the mobile controls inside its
             context so a sidebar update cannot propagate through the routed view. */}
         <Sheet open={menuOpen} onOpenChange={setMenuOpen}>
-          <MobileTopBar title={current?.label ?? 'cezar'} />
+          <MobileTopBar title={current?.label ?? brandName} />
           {/* The drawer keeps its fixed 264px: it is a full-height overlay on a phone, where
               there is no second column to trade width with and no pointer to drag a border. */}
           <MobileNavDrawer {...nav} onNavigate={closeMenu} />
@@ -321,12 +335,14 @@ export const AppShell = React.memo(function AppShell({
 
         <AppShellMain mainRef={mainRef}>{children}</AppShellMain>
 
-        {/* Row 4: the composer dock (thread reply, Step R3). Empty today, but it still carries
+        {/* Row 4: the composer dock (thread reply, Step R3) — the footer banner above it, and
             the bottom safe-area gutter so the scroller never runs under the home indicator. */}
         <div
           data-slot="composer"
           className="row-start-4 pb-[env(safe-area-inset-bottom)]"
-        />
+        >
+          {footerBanner}
+        </div>
       </div>
     </div>
   )
@@ -339,7 +355,7 @@ export const AppShell = React.memo(function AppShell({
  * the dialog shows the install log and the restart. With tasks in flight the dialog opens to its
  * warning instead and waits for "Update & restart": a restart interrupts them.
  */
-function TitlebarUpdateButton({ latestVersion }: { latestVersion: string }) {
+function TitlebarUpdateButton({ latestVersion, brandName }: { latestVersion: string; brandName: string }) {
   const [open, setOpen] = React.useState(false)
   return (
     <>
@@ -347,14 +363,14 @@ function TitlebarUpdateButton({ latestVersion }: { latestVersion: string }) {
         type="button"
         data-slot="titlebar-update"
         onClick={() => setOpen(true)}
-        title={`Update cezar to v${latestVersion} and restart`}
+        title={`Update ${brandName} to v${latestVersion} and restart`}
         className="inline-flex h-[18px] items-center gap-1 rounded-full border border-primary/40 bg-primary/15 px-2 text-[11px] font-semibold text-foreground transition-colors hover:bg-primary/30"
       >
         <StatusDot tone="pending" pulse className="size-[5px] shrink-0" />
-        Update cezar
+        Update {brandName}
         <span className="font-mono font-medium text-muted-foreground">v{latestVersion}</span>
       </button>
-      {open ? <SelfUpdateDialog open={open} onOpenChange={setOpen} autoApply={latestVersion} /> : null}
+      {open ? <SelfUpdateDialog open={open} onOpenChange={setOpen} autoApply={latestVersion} brandName={brandName} /> : null}
     </>
   )
 }
@@ -384,6 +400,8 @@ type NavProps = {
   hostWidget?: ReactNode
   toolsMenu?: ReactNode
   projectGroups?: ReactNode
+  brandName: string
+  brandLogoUrl: string | null
   singleProject: boolean
 }
 
@@ -578,10 +596,14 @@ function SidebarContent({
   toolsMenu,
   projectGroups,
   singleProject,
+  brandName,
+  brandLogoUrl,
   onNavigate,
   headerAction,
   compactHeader = false,
 }: NavProps & {
+  brandName: string
+  brandLogoUrl: string | null
   /** Fires on any in-drawer navigation. The route-change effect already closes the drawer for
    *  every *changed* route; this also covers re-clicking the active item (per the spec, Tasks
    *  navigates home even when already active), which changes no pathname at all. */
@@ -603,7 +625,7 @@ function SidebarContent({
       className="@container/sidebar flex min-h-0 flex-1 flex-col pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
     >
       <div className={cn('flex items-center gap-[9px] px-3.5 pb-2.5', compactHeader ? 'pt-1.5' : 'pt-3.5')}>
-        <BrandLockup />
+        <BrandLockup name={brandName} logoUrl={brandLogoUrl} />
         {/* With project groups mounted the boot repo/branch is one group header among many —
             a chip repeating it up here would just be the first group's header said twice. */}
         {repo && !projectGroups ? (
@@ -754,7 +776,7 @@ function SidebarContent({
           <div data-slot="tools-menu" className="shrink-0">
             {toolsMenu}
           </div>
-          {version ? <VersionChip version={version} latestVersion={latestVersion} /> : null}
+          {version ? <VersionChip version={version} latestVersion={latestVersion} brandName={brandName} /> : null}
           {starCount === null ? null : <StarChip count={starCount} />}
           <GlobalSettingsLink onNavigate={onNavigate} className="ml-auto" />
           <ThemeToggle />
@@ -877,7 +899,8 @@ function GlobalSettingsLink({
  * The "Add project" dropdown beside the New task CTA (multi-project spec, "Sidebar → Header").
  *
  * "Open local folder…" opens the folder-browser dialog (step 4.2); "Clone from GitHub…" opens
- * the checkout dialog (step 4.3).
+ * the checkout dialog (step 4.3); "New project…" opens the create dialog (spec
+ * 2026-09-29-create-new-project) — a fresh git repo, optionally a new private GitHub repo.
  *
  * Neither item is gh-gated here, deliberately. The spec's "disabled with a reason when `gh` is
  * unavailable" would mean reading `GET /api/health` from this component — and the dialogs are
@@ -894,6 +917,7 @@ function GlobalSettingsLink({
 function AddProjectMenu() {
   const [browsing, setBrowsing] = React.useState(false)
   const [cloning, setCloning] = React.useState(false)
+  const [creating, setCreating] = React.useState(false)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -910,17 +934,52 @@ function AddProjectMenu() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-56">
         <DropdownMenuLabel className="text-xs text-soft-foreground">Add project</DropdownMenuLabel>
-        <DropdownMenuItem data-slot="add-project-local" onSelect={() => setBrowsing(true)}>
+        <DropdownMenuItem
+          data-slot="add-project-local"
+          onSelect={() => {
+            setBrowsing(true)
+            trackAddProjectOpened('folder')
+          }}
+        >
           <FolderIcon aria-hidden="true" />
           Open local folder…
         </DropdownMenuItem>
-        <DropdownMenuItem data-slot="add-project-clone" onSelect={() => setCloning(true)}>
+        <DropdownMenuItem
+          data-slot="add-project-clone"
+          onSelect={() => {
+            setCloning(true)
+            trackAddProjectOpened('clone')
+          }}
+        >
           <GithubIcon aria-hidden="true" />
           Clone from GitHub…
         </DropdownMenuItem>
+        <DropdownMenuItem
+          data-slot="add-project-create"
+          onSelect={() => {
+            setCreating(true)
+            trackAddProjectOpened('new')
+          }}
+        >
+          <FolderPlusIcon aria-hidden="true" />
+          New project…
+        </DropdownMenuItem>
       </DropdownMenuContent>
-      {browsing ? <AddProjectDialog open onOpenChange={setBrowsing} /> : null}
-      {cloning ? <CloneProjectDialog open onOpenChange={setCloning} /> : null}
+      {browsing ? (
+        <DialogErrorBoundary label="Open local folder" onError={() => setBrowsing(false)}>
+          <AddProjectDialog open onOpenChange={setBrowsing} />
+        </DialogErrorBoundary>
+      ) : null}
+      {cloning ? (
+        <DialogErrorBoundary label="Clone from GitHub" onError={() => setCloning(false)}>
+          <CloneProjectDialog open onOpenChange={setCloning} />
+        </DialogErrorBoundary>
+      ) : null}
+      {creating ? (
+        <DialogErrorBoundary label="New project" onError={() => setCreating(false)}>
+          <CreateProjectDialog open onOpenChange={setCreating} />
+        </DialogErrorBoundary>
+      ) : null}
     </DropdownMenu>
   )
 }
@@ -975,7 +1034,7 @@ function CommandPaletteHint() {
  * the semver, and the `title` keeps the whole string — which is why the tooltip is now there
  * even with no update to announce.
  */
-function VersionChip({ version, latestVersion }: { version: string; latestVersion: string | null }) {
+function VersionChip({ version, latestVersion, brandName }: { version: string; latestVersion: string | null; brandName: string }) {
   const updateAvailable = Boolean(latestVersion && latestVersion !== version)
   // The chip opens the self-update dialog (PoC): channel, latest, and a version picker.
   const [open, setOpen] = React.useState(false)
@@ -986,14 +1045,14 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
         data-slot="version-chip"
         data-update-available={updateAvailable ? 'true' : undefined}
         title={updateAvailable ? `v${version} — update available: v${latestVersion}` : `v${version}`}
-        aria-label={updateAvailable ? `cezar v${version}, update to v${latestVersion} available — open updater` : `cezar v${version} — open updater`}
+        aria-label={updateAvailable ? `${brandName} v${version}, update to v${latestVersion} available — open updater` : `${brandName} v${version} — open updater`}
         onClick={() => setOpen(true)}
         className="flex min-w-0 cursor-pointer items-center gap-1 rounded-full border border-border px-1.5 py-px font-mono text-[10px] font-medium text-soft-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-[3px] focus-visible:ring-ring/50"
       >
         {updateAvailable ? <StatusDot tone="pending" pulse className="size-[5px] shrink-0" /> : null}
         <span className="truncate">v{version}</span>
       </button>
-      {open ? <SelfUpdateDialog open={open} onOpenChange={setOpen} /> : null}
+      {open ? <SelfUpdateDialog open={open} onOpenChange={setOpen} brandName={brandName} /> : null}
     </>
   )
 }

@@ -28,6 +28,9 @@ const ALLOWED_LITERAL_SITES = new Set([
   'packages/api-client/src/protocol/ui-events.ts',
   'packages/cezar/src/core/ui-events.ts',
   'packages/cezar/src/agent-config/catalog.ts', // project.agents: the AGENTS.md readers subset
+  'packages/cezar/src/agent-config/account-identity.ts', // the identity-readable subset; the Record over its complement is what forces a new runner to add its row
+  'packages/cezar/src/core/private-mcp.ts', // PRIVATE_MCP_RUNNERS: the runners with a launch-time MCP channel
+  'packages/cezar/src/workflows/run.ts', // RESUMABLE_BACKENDS: the runners whose `resume` is honored
 ]);
 
 function* sourceFiles(dir: string): Generator<string> {

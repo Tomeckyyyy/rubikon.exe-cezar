@@ -17,6 +17,7 @@ import { deriveAttention } from '@/lib/attention'
 import { shortAge } from '@/lib/format'
 import { availablePromptTemplates, insertTemplate, normalizePromptTemplates } from '@/lib/prompt-templates'
 import { isHttpUrl } from '@/lib/utils'
+import { trackMessageSent } from '@/lib/telemetry'
 
 /**
  * `/inbox` — the follow-up inbox rebuilt in React (R6 Step 1.2, spec §"Skills, Workflows,
@@ -96,7 +97,7 @@ export function InboxRoute() {
             icon={<InboxIcon />}
             tone="neutral"
             title="The follow-up inbox is off"
-            subtitle="Agents are not asked to leave follow-ups. Set CEZ_FOLLOWUPS=1 and restart cezar to turn the inbox on."
+            subtitle="Agents are not asked to leave follow-ups. Set CEZ_FOLLOWUPS=1 and restart the service to turn the inbox on."
             heading="h2"
           />
         ) : todos === undefined ? (
@@ -201,6 +202,7 @@ function TodoCard({
     },
     onSuccess: (result) => {
       if (result === null) return
+      trackMessageSent('inbox')
       const { run } = result
       // The server rewrote todos.json (SSE will confirm); the invalidations just refuse to
       // wait for the file watcher's debounce.

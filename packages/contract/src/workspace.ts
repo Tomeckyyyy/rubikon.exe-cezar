@@ -26,6 +26,10 @@ import { type Runner, runnerSchema, perRunner } from './runners.ts';
  * was wider than the server has ever been.
  */
 export const workspaceConfigResponseSchema = z.object({
+  branding: z.object({
+    name: z.string(),
+    logoUrl: z.string().nullable(),
+  }),
   /** Root exposed by the Add-project directory browser — stored as written (`~` kept). */
   browseRoot: z.string(),
   /** Checkout root for GUI-cloned projects — stored as written (`~` kept). */
@@ -73,6 +77,9 @@ export type WorkspaceConfigResponse = z.infer<typeof workspaceConfigResponseSche
  * the next load's `.catch`.
  */
 export const setWorkspaceConfigInputSchema = z.object({
+  branding: z.object({
+    name: z.string().trim().min(1).max(80).nullable().optional(),
+  }).optional(),
   browseRoot: z.string().trim().min(1).max(4096).optional(),
   projectsDir: z.string().trim().min(1).max(4096).optional(),
   skillsAutoUpdate: z.boolean().nullable().optional(),
@@ -104,6 +111,10 @@ export const setWorkspaceConfigInputSchema = z.object({
     .optional(),
 });
 export type SetWorkspaceConfigInput = z.infer<typeof setWorkspaceConfigInputSchema>;
+
+/** Multipart upload result for the workspace's local instance logo. */
+export const workspaceBrandingLogoResponseSchema = z.object({ logoUrl: z.string().nullable() });
+export type WorkspaceBrandingLogoResponse = z.infer<typeof workspaceBrandingLogoResponseSchema>;
 
 // ---- GUI prefs — the two open bags ----------------------------------------------------------
 
@@ -153,6 +164,8 @@ export const uiStateSchema = z.looseObject({
   lastAutonomous: z.boolean().optional(),
   /** Whether new runs should ask agents to append follow-up work. Absent → on. */
   lastGenerateFollowups: z.boolean().optional(),
+  /** The selected default team skills for this repo. Absent means all default skills remain available. */
+  importedSkills: z.array(z.string().min(1).max(200)).max(200).optional(),
   /** Skill selection frequency (#408): name → times chosen, across BOTH composers. */
   skillUsage: z.record(z.string(), z.number()).optional(),
   runsView: z.enum(['list', 'table']).optional(),
@@ -175,19 +188,26 @@ export const uiStateSchema = z.looseObject({
       }),
     )
     .optional(),
-  /** The open-mercato/skills promo banner (#391), dismissed for good. Legacy — the banner is
-   *  gone, replaced by `WorkspaceUiState.importedSkills`; retained so old files round-trip. */
+  /** The open-mercato/skills promo banner (#391), dismissed for good. Legacy — retained so old files round-trip. */
   dismissedSkillsBanner: z.boolean().optional(),
 });
 export type UiState = z.infer<typeof uiStateSchema>;
+
+/** Maximum persisted text for one reusable prompt template (#908).
+ *
+ * 20,000 characters accommodates long skills while keeping each ui-state entry bounded. The
+ * server write schema and cockpit editor mirror this documented value; the response schema above
+ * remains intentionally permissive so older/newer ui-state files round-trip safely.
+ */
+export const PROMPT_TEMPLATE_TEXT_MAX = 20_000;
 
 /**
  * `GET/PUT /api/v1/workspace/ui-state` — cross-project GUI prefs in `~/.cezar/ui-state.json`
  * (multi-project spec, step 2.7).
  *
  * The same open bag as its per-repo twin above, and open for the same reason. The PUT merges
- * SHALLOWLY at the top level server-side, so a writer must send the whole `sidebar` object (or the
- * whole `importedSkills` array), never a leaf.
+ * SHALLOWLY at the top level server-side, so a writer must send the whole `sidebar` object, never a
+ * leaf.
  */
 export const workspaceLastLocationSchema = z.strictObject({
   projectId: z.string().min(1).max(64),
@@ -261,9 +281,8 @@ export const workspaceUiStateSchema = z.looseObject({
    *  cockpit keeps it in localStorage (`packages/web/src/lib/last-location.ts`): stored here, the
    *  last client to navigate decided where every OTHER client's next launch landed. */
   lastLocation: workspaceLastLocationSchema.optional(),
-  /** The user's curated selection of default (vendor) skills. Tri-state: ABSENT means "not
-   *  curated", so every default skill shows; a PRESENT array (even `[]`) means only those names
-   *  show from that repo. */
+  /** Legacy source for default team-skill selections. New choices are project-scoped; this stays
+   *  typed so projects without a local choice preserve selections from older cockpit versions. */
   importedSkills: z.array(z.string()).optional(),
 });
 export type WorkspaceUiState = z.infer<typeof workspaceUiStateSchema>;
@@ -301,10 +320,7 @@ export const setWorkspaceUiStateInputSchema = z
       .strict()
       .partial()
       .optional(),
-    importedSkills: z
-      .array(z.string().min(1).max(200))
-      .max(WORKSPACE_UI_STATE_MAX_KEYS)
-      .optional(),
+    importedSkills: z.array(z.string().min(1).max(200)).max(WORKSPACE_UI_STATE_MAX_KEYS).optional(),
     taskTable: taskTableUiStateSchema
       .extend({
         expandedColumns: z
@@ -342,6 +358,9 @@ export const configResponseSchema = z.object({
   baseBranch: z.string().nullable(),
   defaultRunner: runnerSchema,
   systemPrompt: z.string().nullable(),
+  /** Free-text branch naming instructions (spec 2026-10-11-branch-naming-instructions); null =
+   *  task branches stay `cez/<id8>`. */
+  branchNaming: z.string().nullable(),
   defaultModels: runnerModelsSchema,
   /** True when native coding-agent settings are authoritative and model picks are read-only. */
   modelsLocked: z.boolean(),
@@ -375,6 +394,8 @@ export const setConfigInputSchema = z.object({
   baseBranch: z.string().trim().min(1).max(200).nullable().optional(),
   defaultRunner: runnerSchema.optional(),
   systemPrompt: z.string().trim().max(20_000).nullable().optional(),
+  /** Clears on `null` or `''` like `systemPrompt`. */
+  branchNaming: z.string().trim().max(4_000).nullable().optional(),
   defaultModels: perRunner(z.string().trim().max(200).nullable().optional())
     .optional(),
   /** Per-runner "auto is the default" override (#906), additive: clearing a `defaultModels` preset
