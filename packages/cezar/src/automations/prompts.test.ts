@@ -9,6 +9,10 @@ import {
   CREATE_AUTOMATION_SKILL_NAME,
 } from './prompts.ts';
 
+function containsRunnerToken(text: string, runner: string): boolean {
+  return new RegExp(`(?:^|[^A-Za-z0-9_-])${runner}(?=$|[^A-Za-z0-9_-])`).test(text);
+}
+
 /** The prompts are the ONLY place an agent learns the `cez automation` CLI and the definition
  *  shape, so they must name every command, every event and every key the storage schema accepts. */
 describe('the automations prompt part', () => {
@@ -31,6 +35,10 @@ describe('the automations prompt part', () => {
 });
 
 describe('the definition reference', () => {
+  it('names every supported runner as a standalone token', () => {
+    for (const runner of RUNNER_IDS) expect(containsRunnerToken(AUTOMATION_SCHEMA_REFERENCE, runner)).toBe(true);
+  });
+
   it('names every event the storage schema accepts, and no other', () => {
     for (const event of automationEventSchema.options) expect(AUTOMATION_SCHEMA_REFERENCE).toContain(event);
     const mentioned = AUTOMATION_SCHEMA_REFERENCE.match(/\b(?:pull_request|issue)\.[a-z_]+/g) ?? [];
